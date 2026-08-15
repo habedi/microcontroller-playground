@@ -1,0 +1,16 @@
+[submodule "external/nuttx"]
+	path = external/nuttx
+	url = https://github.com/apache/nuttx
+	shallow = true
+[submodule "external/nuttx-apps"]
+	path = external/nuttx-apps
+	url = https://github.com/apache/nuttx-apps
+	shallow = true
+[submodule "external/pico-sdk"]
+	path = external/pico-sdk
+	url = https://github.com/raspberrypi/pico-sdk
+	shallow = true
+[submodule "external/crosstool-ng"]
+	path = external/crosstool-ng
+	url = https://github.com/espressif/crosstool-NG
+	shallow = true

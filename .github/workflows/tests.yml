@@ -1,0 +1,66 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  schedule: # Run every day at midnight (UTC)
+    - cron: '0 0 * * *'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Repository checks: the Git hooks and the Nix flake.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install the Python tools
+        run: make install
+
+      - name: Run the Git hooks on all files
+        run: make test-hooks
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Evaluate the Nix flake
+        run: nix flake check --no-build
+
+  # A NuttX build for the Pico 2, with the apt toolchain. It proves the
+  # submodules, the system dependencies, and the build flow stay working.
+  # The boards themselves are not in CI, so nothing is flashed or run.
+  nuttx-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install system dependencies
+        run: make setup-deps
+
+      - name: Configure and build NuttX for the Pico 2
+        env:
+          PICO_SDK_PATH: ${{ github.workspace }}/external/pico-sdk
+        run: |
+          make nuttx-configure BOARD=raspberrypi-pico-2:nsh
+          make nuttx-build
