@@ -18,7 +18,7 @@ shell: ## Enter the Nix dev shell (primary development environment)
 	nix develop
 
 .PHONY: setup-deps
-setup-deps: ## Install system dependencies (on Debian-based OSes)
+setup-deps: ## Install system dependencies (on Debian-based systems)
 	sudo apt-get update
 	sudo apt-get install -y \
 		build-essential cmake ninja-build pkg-config \
