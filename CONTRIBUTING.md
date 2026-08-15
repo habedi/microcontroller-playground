@@ -6,8 +6,7 @@ Contributions are always welcome and appreciated.
 ### How to Contribute
 
 Please check the [issue tracker](https://github.com/habedi/microcontroller-playground/issues) to see if there is an issue
-you
-would like to work on or if it has already been resolved.
+you would like to work on or if it has already been resolved.
 
 #### Reporting Bugs
 
@@ -21,13 +20,18 @@ would like to work on or if it has already been resolved.
 
 ### Submitting Pull Requests
 
-- Make sure all tests pass before submitting a pull request.
+- Make sure the Git hooks pass (`make test-hooks`) before submitting a pull request.
+- If the change touches an experiment, verify it on the real board and say so in the description.
 - Write a clear description of the changes you made and the reasons behind them.
 
 > [!IMPORTANT]
 > It's assumed that by submitting a pull request, you agree to license your contributions under the project's license.
 
 ### Development Workflow
+
+> [!IMPORTANT]
+> If you're using an AI-assisted coding tool like Claude Code or Codex, make sure the AI follows the instructions in
+> the root [AGENTS.md](AGENTS.md) file.
 
 #### Prerequisites
 
@@ -38,20 +42,20 @@ Install GNU Make if it's not already installed on your system.
 sudo apt-get install make
 ```
 
-- Use the `make setup` command to install the development dependencies.
-- Use the `make install` command to install the Python dependencies.
+- Use the `make submodules` command to fetch the git submodules under `external/`.
+- Use the `make shell` command to enter the Nix dev shell, the primary development environment.
+  On a Debian-based system without Nix, `make setup-deps` installs a partial set of dependencies with apt instead.
+- Use the `make install` command to install the uv-managed Python tools.
 
-#### Code Style
+#### Git Hooks
 
-- Use the `make format` command to format the code.
+- Use the `make setup-hooks` command to install the Git hooks.
+- Use the `make test-hooks` command to run the hooks on all files.
 
-#### Running Tests
+#### Building
 
-- Use the `make test` command to run the tests.
-
-#### Running Linter Checks
-
-- Use the `make lint` command to run the linter checks.
+- Use the `make nuttx-configure` and `make nuttx-build` commands to configure and build NuttX.
+  See [AGENTS.md](AGENTS.md) for the boards, the flashing targets, and the validation expectations.
 
 #### See Available Commands
 
