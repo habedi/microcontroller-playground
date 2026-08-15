@@ -6,8 +6,7 @@ Contributions are always welcome and appreciated.
 ### How to Contribute
 
 Please check the [issue tracker](https://github.com/habedi/microcontroller-playground/issues) to see if there is an issue
-you
-would like to work on or if it has already been resolved.
+you would like to work on or if it has already been resolved.
 
 #### Reporting Bugs
 
@@ -28,6 +27,10 @@ would like to work on or if it has already been resolved.
 > It's assumed that by submitting a pull request, you agree to license your contributions under the project's license.
 
 ### Development Workflow
+
+> [!IMPORTANT]
+> If you're using an AI-assisted coding tool like Claude Code or Codex, make sure the AI follows the instructions in
+> the root [AGENTS.md](AGENTS.md) file.
 
 #### Prerequisites
 
