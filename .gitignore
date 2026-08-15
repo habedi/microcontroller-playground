@@ -75,6 +75,11 @@ poetry.lock
 # Documentation files
 site/
 
+# Nix build outputs and the pinned dev shell profile
+result
+result-*
+.nix-devshell-profile*
+
 # Miscellaneous files and directories to ignore
 # Add any additional file patterns a directory names that should be ignored down here
 .env

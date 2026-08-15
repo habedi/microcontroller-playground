@@ -45,13 +45,36 @@
             picotool
           ];
 
-          # The ESP32-P4 and the ESP32-C6 (bare-metal RISC-V). NuttX expects
-          # the riscv-none-elf- prefix. Either pass CROSSDEV=riscv32-none-elf-
-          # to make, or build the exact toolchain from external/crosstool-ng.
-          # esptool is not listed here; uv manages it through pyproject.toml.
-          esp32Tools = with pkgs; [
-            pkgsCross.riscv32-embedded.buildPackages.gcc
-            pkgsCross.riscv32-embedded.buildPackages.binutils
+          # The ESP32-P4 and the ESP32-C6 (bare-metal RISC-V). The stock
+          # nixpkgs riscv32-none-elf compiler defaults to rv32imafdc with the
+          # ilp32d ABI and carries no multilib, so its libgcc cannot link the
+          # soft-float rv32imac code that NuttX builds for either chip. This
+          # toolchain sets the default architecture and ABI to the ones the
+          # boards use. Enabling the ESP32-P4 FPU in NuttX would mean
+          # rv32imafc with ilp32f here.
+          riscv32Pkgs = import nixpkgs {
+            inherit system;
+            crossSystem = {
+              config = "riscv32-none-elf";
+              libc = "newlib-nano";
+              gcc = {
+                arch = "rv32imac";
+                abi = "ilp32";
+              };
+            };
+          };
+
+          # GCC 14, not 15, because GCC 15 defaults to C23, which removed
+          # ATOMIC_VAR_INIT, and the Espressif HAL that NuttX vendors still
+          # uses that macro. NuttX picks its command prefix from the board
+          # configuration, and the Espressif boards ask for
+          # riscv64-unknown-elf-, so a build has to pass
+          # CROSSDEV=riscv32-none-elf- on the make command line to point it
+          # here. esptool is not listed here; uv manages it through
+          # pyproject.toml.
+          esp32Tools = [
+            riscv32Pkgs.buildPackages.gcc14
+            riscv32Pkgs.buildPackages.binutils
           ];
 
           # Rust and Zig, for experiments beyond C. rustup adds the embedded

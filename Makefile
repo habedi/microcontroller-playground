@@ -1,5 +1,8 @@
 NUTTX_DIR ?= external/nuttx
 BOARD     ?= esp32p4-function-ev-board:nsh
+# The RISC-V toolchain in the dev shell is built from source, so a garbage
+# collection would cost an hour to undo. This profile is a GC root.
+DEVSHELL_PROFILE ?= .nix-devshell-profile
 PORT      ?= /dev/ttyUSB0
 TTY       ?= /dev/ttyACM0
 BAUD      ?= 115200
@@ -16,6 +19,10 @@ help: ## Show help messages for all available targets
 .PHONY: shell
 shell: ## Enter the Nix dev shell (primary development environment)
 	nix develop
+
+.PHONY: shell-pin
+shell-pin: ## Build the dev shell and keep it from being garbage collected
+	nix develop --profile $(DEVSHELL_PROFILE) --command true
 
 .PHONY: setup-deps
 setup-deps: ## Install system dependencies (on Debian-based systems)
