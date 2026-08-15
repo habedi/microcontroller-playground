@@ -8,6 +8,29 @@ TTY       ?= /dev/ttyACM0
 BAUD      ?= 115200
 UF2       ?= $(NUTTX_DIR)/nuttx.uf2
 
+# The architecture of the current NuttX configuration, empty when the tree is not configured yet.
+NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
+
+# NuttX takes its command prefix from the board configuration, and the
+# Espressif boards ask for riscv64-unknown-elf-. The Nix dev shell carries the
+# same compiler under the riscv32-none-elf- name, so a RISC-V build points
+# NuttX there when that name is the one on PATH. A machine with the Debian
+# riscv64-unknown-elf toolchain, CI included, keeps the NuttX default and
+# needs no prefix at all.
+ifeq ($(NUTTX_ARCH),risc-v)
+  ifeq ($(origin CROSSDEV),undefined)
+    CROSSDEV := $(shell command -v riscv32-none-elf-gcc >/dev/null 2>&1 && \
+      echo riscv32-none-elf-)
+  endif
+endif
+NUTTX_MAKE_ARGS = $(if $(CROSSDEV),CROSSDEV=$(CROSSDEV))
+
+# The compiler the build will reach for, used to fail early with a readable
+# message instead of a screen of missing command errors.
+NUTTX_CC = $(strip $(if $(CROSSDEV),$(CROSSDEV)gcc,\
+  $(if $(filter risc-v,$(NUTTX_ARCH)),riscv64-unknown-elf-gcc,\
+  $(if $(filter arm,$(NUTTX_ARCH)),arm-none-eabi-gcc))))
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
@@ -64,9 +87,21 @@ nuttx-configure: ## Configure NuttX for BOARD (default: esp32p4-function-ev-boar
 nuttx-menuconfig: ## Adjust the current NuttX configuration
 	$(MAKE) -C $(NUTTX_DIR) menuconfig
 
+.PHONY: nuttx-check-toolchain
+nuttx-check-toolchain:
+	@test -n "$(NUTTX_ARCH)" || { \
+		echo "No NuttX configuration found in $(NUTTX_DIR)."; \
+		echo "Run make nuttx-configure BOARD=<board>:<config> first."; \
+		exit 1; }
+	@test -z "$(NUTTX_CC)" || command -v $(NUTTX_CC) >/dev/null 2>&1 || { \
+		echo "$(NUTTX_CC) is not on PATH, and the configured board needs it."; \
+		echo "Enter the Nix dev shell with make shell, or install the system"; \
+		echo "packages with make setup-deps."; \
+		exit 1; }
+
 .PHONY: nuttx-build
-nuttx-build: ## Build the configured NuttX image
-	$(MAKE) -C $(NUTTX_DIR)
+nuttx-build: nuttx-check-toolchain ## Build the configured NuttX image
+	$(MAKE) -C $(NUTTX_DIR) $(NUTTX_MAKE_ARGS)
 
 .PHONY: nuttx-distclean
 nuttx-distclean: ## Reset the NuttX tree; run it before switching boards
@@ -74,7 +109,7 @@ nuttx-distclean: ## Reset the NuttX tree; run it before switching boards
 
 .PHONY: nuttx-flash-esp
 nuttx-flash-esp: ## Flash the NuttX image to an Espressif board over PORT
-	$(MAKE) -C $(NUTTX_DIR) flash ESPTOOL_PORT=$(PORT)
+	$(MAKE) -C $(NUTTX_DIR) flash ESPTOOL_PORT=$(PORT) $(NUTTX_MAKE_ARGS)
 
 # Flashing and the serial console (OS-agnostic)
 .PHONY: flash-pico
