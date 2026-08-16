@@ -8,6 +8,12 @@ TTY       ?= /dev/ttyACM0
 BAUD      ?= 115200
 UF2       ?= $(NUTTX_DIR)/nuttx.uf2
 
+# A Pico in BOOTSEL mode mounts as a mass storage device. The Pico 2 labels the
+# volume RP2350, and the original Pico labels it RPI-RP2. Copying a UF2 there
+# flashes the board without the udev rules that picotool needs.
+PICO_MOUNT ?= $(shell findmnt -rn -o TARGET -S LABEL=RP2350 2>/dev/null || \
+  findmnt -rn -o TARGET -S LABEL=RPI-RP2 2>/dev/null)
+
 # A configuration saved under configs/nuttx/<board>/<name>. The board name
 # comes from the path, and any in-tree configuration of that board serves as
 # the scaffold, because the saved defconfig then replaces the generated one.
@@ -44,7 +50,7 @@ NUTTX_CC = $(strip $(if $(CROSSDEV),$(CROSSDEV)gcc,\
 
 .PHONY: help
 help: ## Show help messages for all available targets
-	@grep -E '^[a-zA-Z_-]+:.*## .*$$' Makefile | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*## .*$$' Makefile | \
 	awk 'BEGIN {FS = ":.*## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 # Setup (OS-agnostic)
@@ -64,6 +70,20 @@ setup-deps: ## Install system dependencies (on Debian-based systems)
 		kconfig-frontends gperf flex bison genromfs libncurses-dev \
 		gcc-arm-none-eabi gcc-riscv64-unknown-elf \
 		picocom openocd
+
+.PHONY: setup-udev
+setup-udev: ## Install the picotool udev rules, so flash-pico runs without sudo
+	@p=$$(command -v picotool) || { \
+		echo "picotool is not on PATH. Enter the dev shell with make shell."; \
+		exit 1; }; \
+	rules="$$(dirname $$(readlink -f $$p))/../etc/udev/rules.d/60-picotool.rules"; \
+	test -f "$$rules" || { \
+		echo "The picotool package carries no udev rules at $$rules."; \
+		exit 1; }; \
+	echo "Installing $$rules"; \
+	sudo install -m 0644 "$$rules" /etc/udev/rules.d/60-picotool.rules && \
+	sudo udevadm control --reload-rules && \
+	sudo udevadm trigger
 
 .PHONY: submodules
 submodules: ## Fetch the git submodules under external/
@@ -145,6 +165,18 @@ nuttx-flash-esp: ## Flash the NuttX image to an Espressif board over PORT
 .PHONY: flash-pico
 flash-pico: ## Flash UF2 (default: the NuttX image) to the Pico 2 with picotool
 	picotool load -fx $(UF2)
+
+.PHONY: flash-pico-uf2
+flash-pico-uf2: ## Flash UF2 by copying it to a Pico that is in BOOTSEL mode
+	@test -f "$(UF2)" || { \
+		echo "$(UF2) does not exist. Build it with make nuttx-build first."; \
+		exit 1; }
+	@test -n "$(PICO_MOUNT)" || { \
+		echo "No Pico in BOOTSEL mode is mounted."; \
+		echo "Hold BOOTSEL while plugging the board in, then try again."; \
+		exit 1; }
+	cp $(UF2) $(PICO_MOUNT)/
+	sync
 
 .PHONY: console
 console: ## Open the serial console on TTY (default: /dev/ttyACM0)
