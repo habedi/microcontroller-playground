@@ -8,6 +8,15 @@ TTY       ?= /dev/ttyACM0
 BAUD      ?= 115200
 UF2       ?= $(NUTTX_DIR)/nuttx.uf2
 
+# A configuration saved under configs/nuttx/<board>/<name>. The board name
+# comes from the path, and any in-tree configuration of that board serves as
+# the scaffold, because the saved defconfig then replaces the generated one.
+# NuttX strips CONFIG_APPS_DIR when it writes a defconfig, so it has to go
+# back in before olddefconfig fills in the remaining defaults.
+SAVED_CONFIG   ?=
+SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
+NUTTX_APPS_DIR ?= ../nuttx-apps
+
 # The architecture of the current NuttX configuration, empty when the tree is not configured yet.
 NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
 
@@ -82,6 +91,27 @@ nuttx-list-boards: ## List the available NuttX boards and configurations
 .PHONY: nuttx-configure
 nuttx-configure: ## Configure NuttX for BOARD (default: esp32p4-function-ev-board:nsh)
 	cd $(NUTTX_DIR) && ./tools/configure.sh $(BOARD)
+
+.PHONY: nuttx-configure-saved
+nuttx-configure-saved: ## Configure NuttX from SAVED_CONFIG (a directory under configs/nuttx)
+	@test -f "$(SAVED_CONFIG)/defconfig" || { \
+		echo "Set SAVED_CONFIG to a directory that holds a defconfig, for example"; \
+		echo "make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1"; \
+		exit 1; }
+	cd $(NUTTX_DIR) && ./tools/configure.sh -E $(SAVED_BOARD):nsh
+	cp $(SAVED_CONFIG)/defconfig $(NUTTX_DIR)/.config
+	kconfig-tweak --file $(NUTTX_DIR)/.config \
+		--set-str CONFIG_APPS_DIR "$(NUTTX_APPS_DIR)"
+	$(MAKE) -C $(NUTTX_DIR) olddefconfig
+
+.PHONY: nuttx-save-config
+nuttx-save-config: ## Save the current NuttX configuration into SAVED_CONFIG
+	@test -n "$(SAVED_CONFIG)" || { \
+		echo "Set SAVED_CONFIG to the directory to write the defconfig into."; \
+		exit 1; }
+	$(MAKE) -C $(NUTTX_DIR) savedefconfig
+	mkdir -p $(SAVED_CONFIG)
+	mv $(NUTTX_DIR)/defconfig $(SAVED_CONFIG)/defconfig
 
 .PHONY: nuttx-menuconfig
 nuttx-menuconfig: ## Adjust the current NuttX configuration
