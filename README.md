@@ -29,30 +29,29 @@ make shell
 > [!IMPORTANT]
 > The first `make shell` builds the RISC-V cross compiler toolchain from source, which can take about an hour.
 > When the first build is done, run `make shell-pin`, so a Nix garbage collection does not discard the build results.
-> The Espressif boards also need `make install`, which installs esptool. Note that the Raspberi Pi Pico 2 does not need it.
+> The Espressif boards also need `make install`, which installs esptool. Note that the Raspberry Pi Pico 2 does not need it.
 
 #### 3. Build and run on the Pico 2
 
 ```shell
 make nuttx-configure BOARD=raspberrypi-pico-2:usbnsh
 make nuttx-build
-make flash-pico-uf2             # Hold BOOTSEL button on the board while plugging the board in
+make flash-pico-uf2             # Hold BOOTSEL (button on the board) while plugging the board in
 make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
 ```
 
 Press Enter after the console opens to get the `nsh>` prompt.
 
 <div align="center">
-  <img alt="NuttShell" src="docs/assets/images/pcio2w-nsh-1.jpeg" width="100%">
+  <img alt="NuttShell" src="docs/assets/images/pico2w-nsh-1.jpeg" width="100%">
 </div>
 
 The `usbnsh` configuration puts the NuttShell on the USB cable, so no extra hardware is needed.
-The `nsh` configuration puts it on UART0 (at GP0 and GP1 pins) which needs a USB to UART adapter.
+The `nsh` configuration puts it on UART0 (at GP0 and GP1 pins), which needs a USB to UART adapter.
 
 Both flash targets need the board in BOOTSEL mode.
 `make flash-pico-uf2` copies the image to the drive that the board exposes, and needs no special permissions.
 `make flash-pico` uses picotool, which needs the udev rules that `make setup-udev` installs once.
-
 
 #### 4. Build and run on the ESP32-P4
 
@@ -75,7 +74,8 @@ Boards that use a CP2102 bridge instead appear as `/dev/ttyUSB0`.
 
 > [!NOTE]
 > Serial access needs membership in the `dialout` group.
-> Run `sudo usermod -aG dialout $USER`, then log in again, if you are not a member of the group.
+> Run `sudo usermod -aG dialout $USER`, then log in again.
+> If you are not a member of the group, you will not have permission to access the serial port.
 
 ---
 
