@@ -72,6 +72,22 @@ jobs:
       - name: Install system dependencies
         run: make setup-deps
 
+      # Ubuntu ships gcc-riscv64-unknown-elf without a C library, and the
+      # Espressif HAL needs sys/lock.h from one. This toolchain carries newlib.
+      # It is pinned to the GCC 14 release on purpose, because GCC 15 and newer
+      # default to C23, which removed the ATOMIC_VAR_INIT macro that the HAL still uses.
+      - name: Install the Espressif RISC-V toolchain
+        if: matrix.name == 'ESP32-P4'
+        env:
+          RELEASE: esp-14.2.0_20260121
+          ARCHIVE: riscv32-esp-elf-14.2.0_20260121-x86_64-linux-gnu.tar.xz
+        run: |
+          curl -fsSL -o toolchain.tar.xz \
+            "https://github.com/espressif/crosstool-NG/releases/download/${RELEASE}/${ARCHIVE}"
+          mkdir -p "${HOME}/toolchain"
+          tar -xf toolchain.tar.xz -C "${HOME}/toolchain"
+          echo "${HOME}/toolchain/riscv32-esp-elf/bin" >> "${GITHUB_PATH}"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 

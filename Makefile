@@ -27,15 +27,20 @@ NUTTX_APPS_DIR ?= ../nuttx-apps
 NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
 
 # NuttX takes its command prefix from the board configuration, and the
-# Espressif boards ask for riscv64-unknown-elf-. The Nix dev shell carries the
-# same compiler under the riscv32-none-elf- name, so a RISC-V build points
-# NuttX there when that name is the one on PATH. A machine with the Debian
-# riscv64-unknown-elf toolchain, CI included, keeps the NuttX default and
-# needs no prefix at all.
+# Espressif boards ask for riscv64-unknown-elf-. A RISC-V build points NuttX at
+# whichever usable compiler is on PATH instead, like riscv32-none-elf- from the Nix
+# dev shell, or riscv32-esp-elf- from the toolchain Espressif publishes, which
+# is what CI installs. The Debian riscv64-unknown-elf package cannot build
+# these boards, because it ships no C library, and the Espressif HAL needs
+# sys/lock.h from one.
 ifeq ($(NUTTX_ARCH),risc-v)
   ifeq ($(origin CROSSDEV),undefined)
-    CROSSDEV := $(shell command -v riscv32-none-elf-gcc >/dev/null 2>&1 && \
-      echo riscv32-none-elf-)
+    CROSSDEV := $(shell \
+      if command -v riscv32-none-elf-gcc >/dev/null 2>&1; then \
+        echo riscv32-none-elf-; \
+      elif command -v riscv32-esp-elf-gcc >/dev/null 2>&1; then \
+        echo riscv32-esp-elf-; \
+      fi)
   endif
 endif
 NUTTX_MAKE_ARGS = $(if $(CROSSDEV),CROSSDEV=$(CROSSDEV))
