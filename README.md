@@ -42,7 +42,8 @@ make flash-pico-uf2             # Hold BOOTSEL (button on the board) while plugg
 make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
 ```
 
-Press Enter after the console opens to get the `nsh>` prompt.
+Press Enter twice after the console opens to get the `nsh>` prompt.
+The first Enter only echoes, and the session starts on the second one.
 
 <div align="center">
   <img alt="NuttShell" src="docs/assets/images/pico2w-nsh-1.jpeg" width="100%">
