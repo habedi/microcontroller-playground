@@ -12,7 +12,7 @@ This is a playground for my microcontroller projects and experiments.
 
 ---
 
-### Getting Started
+### Quickstart
 
 #### 1. Clone the repository
 

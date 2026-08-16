@@ -19,7 +19,10 @@ Priorities, in order:
 The boards connect over USB to a Linux development machine, on either amd64 or arm64.
 
 - ESP32-P4 development board with 32 MB of PSRAM and headers. The ESP32-P4 is a dual-core RISC-V application processor with no radio. The board
-  pairs it with an onboard ESP32-C6, which acts as a wireless coprocessor and provides Wi-Fi 6 and Bluetooth LE.
+  pairs it with an onboard ESP32-C6, which acts as a wireless coprocessor and provides Wi-Fi 6 and Bluetooth LE. This sample is silicon revision
+  v1.3, below the v3.0 that NuttX supports, so it needs `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and
+  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. It boots NuttX with those set, but its USB console does not reach a shell prompt, so
+  the board needs a USB to UART adapter on GPIO37 and GPIO38 before it is usable.
 - Raspberry Pi Pico 2 WH: an RP2350 board with headers and a wireless module. The RP2350 has both Arm Cortex-M33 and RISC-V Hazard3 cores. The
   NuttX port targets the Cortex-M33 cores.
 - 40-pin male-to-female Dupont jumper wires, 30 cm, for breadboard and peripheral wiring.
@@ -32,6 +35,9 @@ The boards connect over USB to a Linux development machine, on either amd64 or a
 - Do not add features, error handling, or abstractions beyond what the current experiment needs.
 - Never commit changes inside the submodules under `external/` from this repository. A patch that must survive belongs in this repository as a patch
   file or an out-of-tree file. An intentional submodule version bump is its own commit.
+- Watch for repositories nested inside a submodule. The Espressif HAL at `external/nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty` is its own git
+  repository, cloned by the NuttX build and ignored by NuttX itself, so `git -C external/nuttx status` reports a clean tree while edits sit there
+  unnoticed. Check it directly before concluding that the submodules are untouched.
 - Do not flash a board or open its serial port without being asked. The user may be using the board.
 
 ## External Dependencies
@@ -41,8 +47,8 @@ External code lives in git submodules under `external/`. It is never copied into
 - `external/nuttx`: the Apache NuttX RTOS kernel and build system.
 - `external/nuttx-apps`: the NuttX applications tree. The build expects it next to the kernel.
 - `external/pico-sdk`: the Raspberry Pi Pico SDK. The NuttX rp23xx port builds against it through `PICO_SDK_PATH`.
-- `external/crosstool-ng`: the Espressif fork of crosstool-NG. It builds the `riscv-none-elf` toolchain that NuttX expects for the Espressif RISC-V
-  chips.
+- `external/crosstool-ng`: the Espressif fork of crosstool-NG. It can build a bare-metal RISC-V toolchain for the Espressif chips. The dev shell
+  builds its own compiler through the flake instead, so this submodule is a fallback rather than part of the normal setup.
 
 After cloning, run `git submodule update --init --depth 1` to fetch them.
 
@@ -75,11 +81,20 @@ All builds run inside the Nix dev shell. The `make nuttx-*` targets wrap the ste
    before switching boards.
 3. Adjust options with `make menuconfig`, then build with `make`.
 
+Any change to the configuration needs a clean rebuild. NuttX does not reliably recompile the vendored Espressif HAL objects when `.config` changes,
+so an incremental build can link objects compiled under the previous options. That has already produced a phantom linker error, whose workaround
+resolved a function to address zero and shipped it. After `kconfig-tweak`, `menuconfig`, or any other configuration edit, run `make nuttx-distclean`,
+configure again, and build from scratch. When a rebuild produces a byte-identical image after a configuration change, the build was skipped, not
+unnecessary.
+
 Flashing depends on the chip family:
 
-- Espressif boards flash over the USB serial port with esptool. Use the NuttX `make flash ESPTOOL_PORT=/dev/ttyUSB0` target, or run `uv run esptool`
-  directly. The first flash of a chip also needs the bootloader, which the NuttX build downloads or builds for you.
-- The Pico 2 flashes by copying `nuttx.uf2` to the board while it is in BOOTSEL mode, or with `picotool load` over USB.
+- Espressif boards flash over the USB serial port with esptool. Use the NuttX `make flash ESPTOOL_PORT=<port>` target, or run `uv run esptool`
+  directly. The port depends on the board. The ESP32-P4 development board wires its USB-C connector to the chip's own USB Serial/JTAG controller, so
+  it appears as `/dev/ttyACM0`. Boards that use a CP2102 bridge appear as `/dev/ttyUSB0` instead. The first flash of a chip also needs the bootloader,
+  which the NuttX build downloads or builds for you.
+- The Pico 2 flashes in BOOTSEL mode, either with `make flash-pico-uf2`, which copies `nuttx.uf2` to the drive the board exposes and needs no special
+  permissions, or with `make flash-pico`, which uses `picotool` and needs the udev rules that `make setup-udev` installs once.
 
 Reach the serial console with `picocom` (for example `picocom -b 115200 /dev/ttyACM0`). Serial access needs membership in the `dialout` group on most
 Linux distributions (some use `uucp` instead).
@@ -87,9 +102,15 @@ Linux distributions (some use `uucp` instead).
 ## Toolchains
 
 - The Pico 2 builds with `arm-none-eabi-gcc`, provided by the dev shell.
-- The ESP32-P4 and the ESP32-C6 build with a bare-metal RISC-V toolchain. The dev shell provides `riscv32-none-elf-gcc` from nixpkgs. NuttX defaults
-  to the `riscv-none-elf-` prefix, so either set `CROSSDEV=riscv32-none-elf-` on the make command line or build the exact expected toolchain from
-  `external/crosstool-ng`.
+- The ESP32-P4 and the ESP32-C6 build with a bare-metal RISC-V toolchain. The dev shell builds its own `riscv32-none-elf-gcc`, because the stock
+  nixpkgs one does not work here. That compiler carries no multilib and only an `ilp32d` libgcc, which cannot link the soft-float `rv32imac` code
+  NuttX generates for either chip. The flake pins a `crossSystem` with `gcc.arch = "rv32imac"` and `gcc.abi = "ilp32"` instead, and takes GCC 14
+  rather than 15, since GCC 15 defaults to C23 and C23 removed the `ATOMIC_VAR_INIT` macro that the vendored Espressif HAL still uses. The build is
+  from source and takes about an hour on a cold Nix store, so run `make shell-pin` afterwards to keep a garbage collection from discarding it.
+- These board configurations select `CONFIG_RISCV_TOOLCHAIN_GNU_RV64`, so NuttX looks for `riscv64-unknown-elf-`, not the `riscv-none-elf-` prefix.
+  The `make nuttx-*` targets read the configured architecture and pass `CROSSDEV=riscv32-none-elf-` when a RISC-V build finds that compiler on PATH,
+  so the flag does not belong on the command line. A machine using the Debian `gcc-riscv64-unknown-elf` package, CI included, keeps the NuttX default
+  and needs no prefix at all, because that package is multilib and carries the `rv32imac` soft-float variant.
 - Rust experiments use rustup from the dev shell. The targets are `thumbv8m.main-none-eabihf` for the Pico 2, `riscv32imac-unknown-none-elf` for the
   ESP32-C6, and `riscv32imafc-unknown-none-elf` for the ESP32-P4. Add them with `rustup target add`. Flash firmware with `probe-rs` on the Pico 2
   and with `espflash` on the Espressif chips. The dev shell provides both.
@@ -158,9 +179,9 @@ the part of an experiment that survives a move to another board or OS, so prefer
 
 The boards are the test bench for everything else. Before committing a change:
 
-1. The affected configuration builds from a clean tree inside the dev shell.
+1. The affected configuration builds from a clean tree inside the dev shell, after a `make nuttx-distclean`, not from an incremental one.
 2. The image was flashed and seen running on the real board, and the notes say so.
-3. Nothing under `external/` was modified, and no build output is staged.
+3. Nothing under `external/` was modified, and no build output is staged. Check the nested HAL repository as well as the submodules themselves.
 
 ## Commit Hygiene
 
