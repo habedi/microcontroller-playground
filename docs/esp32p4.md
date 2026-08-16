@@ -13,7 +13,7 @@ See [raspberrypi-pico-2.md](raspberrypi-pico-2.md).
 
 This sample reports revision v1.3.
 NuttX supports v3.0 and above, and the stock configuration compiles a revision check that calls `PANIC()` on anything older.
-Two options bypass it are:
+Two options bypass it:
 
 ```
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y

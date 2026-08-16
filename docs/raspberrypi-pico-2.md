@@ -67,6 +67,8 @@ Two ways to flash once the board is in BOOTSEL:
 - `configs/nuttx/raspberrypi-pico-2/usbnsh-tools/defconfig` is the stock `usbnsh` configuration plus
   `CONFIG_SYSTEM_VI` and `CONFIG_SYSTEM_NXDIAG`, which add `vi` and `nxdiag` as builtin applications. The two
   apps cost about 17.6 KB of flash and no RAM at all, since `data` and `bss` are unchanged.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-littlefs/defconfig` is `usbnsh-tools` plus `CONFIG_MTD`,
+  `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS`, which add persistent storage on the internal flash.
 
 Rebuild either one with:
 
@@ -92,11 +94,35 @@ of the flash unused.
 The `usbnsh` configuration mounts nothing but procfs. `CONFIG_FS_PROCFS` and `CONFIG_FS_ANONMAP` are the only
 filesystems compiled in, so there is no writable storage at all. Three ways to change that, cheapest first:
 
+- `littlefs` on the internal flash is the persistent option, and it needs no extra hardware. See the section
+  below.
 - `tmpfs` gives a writable directory in RAM, at the cost of losing it on every reset. One configuration
   option, and there is plenty of heap for it.
-- `littlefs` on the internal flash is the persistent option, and it needs no extra hardware. The flash driver
-  is already in the tree at `arch/arm/src/rp23xx/rp23xx_flash_mtd.c`.
 - FAT on an SD card, through the `spisd` board configuration, needs hardware the board does not have.
+
+### littlefs on the Internal Flash
+
+`CONFIG_MTD`, `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` are enough, and no board code is needed.
+`rp23xx_common_bringup.c` registers the region as `/dev/rpflash` on its own. The defaults place it 1 MB into
+flash and give it 1 MB, which clears the image with room to spare:
+
+```
+CONFIG_RP23XX_FLASH_MTD_OFFSET=0x100000
+CONFIG_RP23XX_FLASH_MTD_SIZE=0x100000
+```
+
+The driver refuses to initialize if the region would overlap `__flash_binary_end`, so the offset has to stay
+beyond the end of the image, on a 4096 byte erase sector boundary.
+
+Nothing is mounted automatically, apart from XIPFS when `CONFIG_FS_XIPFS` is set. Format and mount on the
+first boot, then mount without the option afterwards:
+
+```
+mount -t littlefs -o autoformat /dev/rpflash /mnt
+mount -t littlefs /dev/rpflash /mnt
+```
+
+`df` then reports 256 blocks of 4096 bytes. Files written to `/mnt` survive `reboot` and a power cycle.
 
 ### There Is No SD Card Slot
 

@@ -146,9 +146,12 @@ The repository is meant to grow past its current boards and past NuttX. The conv
 - Do not use em dashes, in documentation or in code comments. Restructure the sentence, or use a colon or semicolon instead.
 - Avoid colorful adjectives and adverbs. Write "rate limiter" not "smart rate limiter".
 - Prefer noun phrases for checklist items over imperative verbs. Write "rate limit enforcement" not "enforce rate limits".
-- Headings in Markdown files must be in title case: "Build from Source" not "Build from source". Minor words stay lowercase unless they are the first
-  word: the articles (a, an, the), the coordinating conjunctions (and, but, or, nor, so, yet, for), and the short prepositions (in, on, at, to, by,
-  of, up, as, from, with, into, over). The prepositions are named because "from" has to be lowercase for "Build from Source" to be correct.
+- Section headings in Markdown files, meaning `##` and `###`, must be in title case: "Build from Source" not "Build from source". Minor words stay
+  lowercase unless they are the first word: the articles (a, an, the), the coordinating conjunctions (and, but, or, nor, so, yet, for), and the short
+  prepositions (in, on, at, to, by, of, up, as, from, with, into, over). The prepositions are named because "from" has to be lowercase for "Build
+  from Source" to be correct.
+- Headings below that level, meaning `####` and deeper, use sentence case: "Clone the repository" not "Clone the Repository". Proper nouns keep their
+  capitals, so "Build and run on the ESP32-P4" is correct.
 - Do not bold the lead-in of a list item. Write "Unit tests: ..." not "**Unit tests**: ...".
 - Use sentence case for the lead-in of a list item. Write "Seed selection: ..." not "Seed Selection: ...". Proper nouns keep their capitals.
 - Capitalize only the first part of a hyphenated compound: "Real-time Scheduling" in a heading, "Real-time" at the start of a sentence, and
