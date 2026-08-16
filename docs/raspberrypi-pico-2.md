@@ -1,12 +1,10 @@
 ## Raspberry Pi Pico 2 Notes
 
-Notes on running Apache NuttX on the Raspberry Pi Pico 2 WH, an RP2350 board with headers and a wireless
-module.
+Apache NuttX on the Raspberry Pi Pico 2 WH, an RP2350 board with headers and a wireless module.
 
 ### Status
 
-Working. The board runs a NuttShell over the USB cable, with no extra hardware. This is the board to reach for
-when something needs to be tried on real silicon.
+Working. The board runs a NuttShell over the USB cable, with no extra hardware.
 
 ```
 nsh> uname -a
@@ -45,16 +43,16 @@ enter 1: b'\r\n'
 enter 2: b'\r\n\r\nNuttShell (NSH)\r\nnsh> '
 ```
 
-A bare echo is not a sign that the board is broken. NuttX echoes received characters in the serial driver when
-`ECHO` is set, so keystrokes come back even when no shell is reading them. Diagnosing this board by whether it
-echoes leads nowhere; send a second Enter and look for the prompt.
+A bare echo does not indicate a working shell. NuttX echoes received characters in the serial driver when
+`ECHO` is set, so keystrokes come back even when nothing is reading them. The prompt is the only reliable
+sign that a session is live.
 
 ### Flashing Always Needs the BOOTSEL Button
 
 Every flash needs the board physically placed in BOOTSEL mode: unplug it, hold BOOTSEL, plug it back in, and
 release. There is no software path. NuttX exposes no picotool reset interface, so `picotool reboot -f -u`
-answers `No accessible RP-series devices in BOOTSEL mode were found` while the board is running. Plan work
-around that, because each test on this board costs a button press.
+answers `No accessible RP-series devices in BOOTSEL mode were found` while the board is running. Each flash
+therefore costs a physical button press.
 
 Two ways to flash once the board is in BOOTSEL:
 
@@ -78,9 +76,8 @@ make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-
 make nuttx-build
 ```
 
-A clean rebuild from a saved configuration is not byte-identical to an earlier image of the same
-configuration. The `text` size moved by 24 bytes between two such builds, with `data` and `bss` unchanged,
-which is link ordering rather than a real difference.
+Two clean builds of the same configuration are not byte-identical. The `text` size can differ by a few dozen
+bytes with `data` and `bss` unchanged, which reflects link ordering rather than a difference in content.
 
 ### Memory and Storage
 
@@ -126,5 +123,5 @@ the tree.
 Anything that needs a network is blocked until the CYW43439 is wired up for this board.
 
 `system/cpuload` and `system/stackmonitor` need kernel options rather than plain application options:
-`SCHED_CPULOAD_SYSCLK` in place of `SCHED_CPULOAD_NONE`, and `STACK_COLORATION`. Neither has been tested on
-this board. Add kernel options one at a time, since each attempt costs a BOOTSEL press.
+`SCHED_CPULOAD_SYSCLK` in place of `SCHED_CPULOAD_NONE`, and `STACK_COLORATION`. Neither is verified on this
+board. Kernel options carry more risk than application options, so enable them one at a time.
