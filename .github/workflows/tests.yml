@@ -25,6 +25,7 @@ jobs:
   # Repository checks: the Git hooks and the Nix flake.
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,11 +45,24 @@ jobs:
       - name: Evaluate the Nix flake
         run: nix flake check --no-build
 
-  # A NuttX build for the Pico 2, with the apt toolchain. It proves the
-  # submodules, the system dependencies, and the build flow stay working.
-  # The boards themselves are not in CI, so nothing is flashed or run.
+  # NuttX builds with the apt toolchains. They prove the submodules, the
+  # system dependencies, and the build flow stay working. Ubuntu ships
+  # gcc-riscv64-unknown-elf with the rv32imac soft-float multilib the
+  # Espressif boards need, under the name their board configuration asks for,
+  # so no toolchain override belongs here. The boards themselves are not in
+  # CI, so nothing is flashed or run.
   nuttx-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Pico 2
+            board: raspberrypi-pico-2:nsh
+          - name: ESP32-P4
+            board: esp32p4-function-ev-board:nsh
+    name: nuttx-build (${{ matrix.name }})
     steps:
       - name: Checkout repository with submodules
         uses: actions/checkout@v4
@@ -58,9 +72,31 @@ jobs:
       - name: Install system dependencies
         run: make setup-deps
 
-      - name: Configure and build NuttX for the Pico 2
+      # Ubuntu ships gcc-riscv64-unknown-elf without a C library, and the
+      # Espressif HAL needs sys/lock.h from one. This toolchain carries newlib.
+      # It is pinned to the GCC 14 release on purpose, because GCC 15 and newer
+      # default to C23, which removed the ATOMIC_VAR_INIT macro that the HAL still uses.
+      - name: Install the Espressif RISC-V toolchain
+        if: matrix.name == 'ESP32-P4'
+        env:
+          RELEASE: esp-14.2.0_20260121
+          ARCHIVE: riscv32-esp-elf-14.2.0_20260121-x86_64-linux-gnu.tar.xz
+        run: |
+          curl -fsSL -o toolchain.tar.xz \
+            "https://github.com/espressif/crosstool-NG/releases/download/${RELEASE}/${ARCHIVE}"
+          mkdir -p "${HOME}/toolchain"
+          tar -xf toolchain.tar.xz -C "${HOME}/toolchain"
+          echo "${HOME}/toolchain/riscv32-esp-elf/bin" >> "${GITHUB_PATH}"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install the Python tools
+        run: make install
+
+      - name: Configure and build NuttX for the ${{ matrix.name }}
         env:
           PICO_SDK_PATH: ${{ github.workspace }}/external/pico-sdk
         run: |
-          make nuttx-configure BOARD=raspberrypi-pico-2:nsh
-          make nuttx-build
+          make nuttx-configure BOARD=${{ matrix.board }}
+          uv run make nuttx-build
