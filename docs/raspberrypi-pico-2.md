@@ -68,7 +68,8 @@ Two ways to flash once the board is in BOOTSEL:
   `CONFIG_SYSTEM_VI` and `CONFIG_SYSTEM_NXDIAG`, which add `vi` and `nxdiag` as builtin applications. The two
   apps cost about 17.6 KB of flash and no RAM at all, since `data` and `bss` are unchanged.
 - `configs/nuttx/raspberrypi-pico-2/usbnsh-littlefs/defconfig` is `usbnsh-tools` plus `CONFIG_MTD`,
-  `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS`, which add persistent storage on the internal flash.
+  `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` for persistent storage on the internal flash, and
+  `CONFIG_READLINE_TABCOMPLETION` and `CONFIG_READLINE_EDIT_EMACS` for shell editing.
 
 Rebuild either one with:
 
@@ -122,7 +123,24 @@ mount -t littlefs -o autoformat /dev/rpflash /mnt
 mount -t littlefs /dev/rpflash /mnt
 ```
 
-`df` then reports 256 blocks of 4096 bytes. Files written to `/mnt` survive `reboot` and a power cycle.
+`df` then reports 256 blocks of 4096 bytes. Files written to `/mnt` survive `reboot`, a power cycle, and
+reflashing the firmware, because the region starts beyond the image. An image that grew past the 1 MB offset
+would collide with it, and the driver refuses to initialize in that case rather than corrupting the data.
+
+### Shell Editing and History
+
+The `usbnsh-littlefs` configuration enables these, and they are verified on the board:
+
+- Command history on the up and down arrows, holding 16 lines of up to 80 characters, from
+  `CONFIG_READLINE_CMD_HISTORY`. The buffer lives in RAM and does not survive a reset, and there is no
+  `history` command to list it.
+- Tab completion of command names, from `CONFIG_READLINE_TABCOMPLETION`. An ambiguous prefix lists the
+  candidates, so `una` and Tab prints `unalias` and `uname`, while `up` and Tab completes to `uptime`.
+- Emacs style line editing with Ctrl-R reverse search, from `CONFIG_READLINE_EDIT_EMACS` and
+  `CONFIG_READLINE_EDIT_EMACS_REVERSE_SEARCH`.
+
+There is no `clear` command in NSH, and Ctrl-L does nothing. Clearing the display is the terminal emulator's
+job on the host side.
 
 ### There Is No SD Card Slot
 
