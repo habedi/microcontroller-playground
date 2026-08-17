@@ -23,6 +23,12 @@ SAVED_CONFIG   ?=
 SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
 NUTTX_APPS_DIR ?= ../nuttx-apps
 
+# The CYW43439 blob that a wireless build embeds. The NuttX board build writes
+# a dummy in its place when it is missing, and the resulting image runs but
+# never talks to the wireless chip, so the build checks for it.
+CYW43_FIRMWARE ?= \
+  external/pico-sdk/lib/cyw43-driver/firmware/43439A0-7.95.49.00.combined
+
 # The architecture of the current NuttX configuration, empty when the tree is not configured yet.
 NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
 
@@ -93,6 +99,7 @@ setup-udev: ## Install the picotool udev rules, so flash-pico runs without sudo
 .PHONY: submodules
 submodules: ## Fetch the git submodules under external/
 	git submodule update --init --depth 1
+	git -C external/pico-sdk submodule update --init --depth 1 lib/cyw43-driver
 
 .PHONY: install
 install: ## Install the uv-managed Python tools (like esptool and pre-commit)
@@ -109,16 +116,39 @@ test-hooks: ## Run the Git hooks on all files
 	uv run pre-commit run --all-files --hook-stage pre-push
 
 # NuttX. A second OS gets its own prefixed group (zephyr-build, and so on).
+.PHONY: nuttx-patch
+nuttx-patch: ## Apply the patches under patches/nuttx to the NuttX submodule
+	@for p in patches/nuttx/*.patch; do \
+		if git -C $(NUTTX_DIR) apply --check "$(CURDIR)/$$p" 2>/dev/null; then \
+			git -C $(NUTTX_DIR) apply "$(CURDIR)/$$p" && echo "applied $$p"; \
+		elif git -C $(NUTTX_DIR) apply --reverse --check "$(CURDIR)/$$p" 2>/dev/null; then \
+			echo "already applied $$p"; \
+		else \
+			echo "ERROR: $$p does not apply cleanly"; exit 1; \
+		fi; \
+	done
+
+.PHONY: nuttx-unpatch
+nuttx-unpatch: ## Remove the patches under patches/nuttx from the NuttX submodule
+	@for p in patches/nuttx/*.patch; do \
+		git -C $(NUTTX_DIR) apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
+			echo "reverted $$p" || echo "not applied $$p"; \
+	done
+
+.PHONY: cyw43-firmware
+cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs
+	uv run python tools/cyw43-firmware.py
+
 .PHONY: nuttx-list-boards
 nuttx-list-boards: ## List the available NuttX boards and configurations
 	cd $(NUTTX_DIR) && ./tools/configure.sh -L
 
 .PHONY: nuttx-configure
-nuttx-configure: ## Configure NuttX for BOARD (default: esp32p4-function-ev-board:nsh)
+nuttx-configure: nuttx-patch ## Configure NuttX for BOARD (default: esp32p4-function-ev-board:nsh)
 	cd $(NUTTX_DIR) && ./tools/configure.sh $(BOARD)
 
 .PHONY: nuttx-configure-saved
-nuttx-configure-saved: ## Configure NuttX from SAVED_CONFIG (a directory under configs/nuttx)
+nuttx-configure-saved: nuttx-patch ## Configure NuttX from SAVED_CONFIG (a directory under configs/nuttx)
 	@test -f "$(SAVED_CONFIG)/defconfig" || { \
 		echo "Set SAVED_CONFIG to a directory that holds a defconfig, for example"; \
 		echo "make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1"; \
@@ -148,6 +178,24 @@ nuttx-check-toolchain:
 		echo "No NuttX configuration found in $(NUTTX_DIR)."; \
 		echo "Run make nuttx-configure BOARD=<board>:<config> first."; \
 		exit 1; }
+	@grep -q '^CONFIG_IEEE80211_INFINEON_CYW43439=y' $(NUTTX_DIR)/.config \
+	  2>/dev/null || exit 0; \
+	grep -q '^CONFIG_RP23XX_INFINEON_CYW43439=y' $(NUTTX_DIR)/.config || { \
+		echo "This configuration asks for the CYW43439, but the board symbol"; \
+		echo "is absent, so the patches under patches/nuttx are not applied."; \
+		echo "Kconfig drops the symbol without a word and the image would"; \
+		echo "build without wlan0. Run make nuttx-patch, then configure again."; \
+		exit 1; }; \
+	fw=$$(sed -n 's/^CONFIG_CYW43439_FIRMWARE_BIN_PATH="\(.*\)"$$/\1/p' \
+	  $(NUTTX_DIR)/.config); \
+	fw=$$(eval echo "$$fw"); \
+	case "$$fw" in /*) ;; *) fw="$(NUTTX_DIR)/$$fw" ;; esac; \
+	if test ! -s "$$fw" || test "$$(stat -c%s "$$fw")" -lt 100000; then \
+		echo "The CYW43439 firmware at $$fw is missing or too small."; \
+		echo "A wireless build substitutes a dummy for it and the image then"; \
+		echo "runs but never talks to the chip. Run make cyw43-firmware."; \
+		exit 1; \
+	fi
 	@test -z "$(NUTTX_CC)" || command -v $(NUTTX_CC) >/dev/null 2>&1 || { \
 		echo "$(NUTTX_CC) is not on PATH, and the configured board needs it."; \
 		echo "Enter the Nix dev shell with make shell, or install the system"; \

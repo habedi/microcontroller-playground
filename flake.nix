@@ -7,8 +7,7 @@
 
   outputs = { self, nixpkgs }:
     let
-      # Development happens on a Linux machine the boards plug into, on
-      # either amd64 or arm64.
+      # Development happens on a Linux machine the boards plug into, on either amd64 or arm64.
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
@@ -94,8 +93,12 @@
             packages = commonTools ++ nuttxTools ++ pico2Tools ++ esp32Tools ++ rustZigTools;
 
             # The NuttX rp23xx port builds against the Pico SDK submodule.
+            # PLAYGROUND_ROOT lets a NuttX configuration name a path in this
+            # repository, such as the generated CYW43439 firmware blob, without
+            # writing a machine specific path into a saved defconfig.
             shellHook = ''
               export PICO_SDK_PATH="$PWD/external/pico-sdk"
+              export PLAYGROUND_ROOT="$PWD"
             '';
           };
         }

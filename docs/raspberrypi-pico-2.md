@@ -17,9 +17,8 @@ nsh> free
 ### Board Name
 
 The NuttX board is `raspberrypi-pico-2`. There is no separate `-w` variant in the tree, and that board
-configuration runs correctly on the WH, with the wireless module unused. The CYW43439 driver does exist, at
-`arch/arm/src/rp23xx/rp23xx_cyw43439.c`, but the board support that wires it up lives in
-`boards/arm/rp23xx/pimoroni-pico-plus-2-w`, so Wi-Fi on this board needs work borrowed from there.
+configuration runs correctly on the WH. Upstream does not wire up the wireless module for it; the patch
+described under Wireless below does, borrowing from `boards/arm/rp23xx/pimoroni-pico-plus-2-w`.
 
 ### Build, Flash, and Connect
 
@@ -70,6 +69,9 @@ Two ways to flash once the board is in BOOTSEL:
 - `configs/nuttx/raspberrypi-pico-2/usbnsh-littlefs/defconfig` is `usbnsh-tools` plus `CONFIG_MTD`,
   `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` for persistent storage on the internal flash, and
   `CONFIG_READLINE_TABCOMPLETION` and `CONFIG_READLINE_EDIT_EMACS` for shell editing.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-wifi/defconfig` is `usbnsh-littlefs` plus the CYW43439 driver, the
+  network stack, and the `wapi`, `ping`, and `renew` tools. It needs the patch and the firmware described
+  under Wireless below.
 
 Rebuild either one with:
 
@@ -169,3 +171,59 @@ Anything that needs a network is blocked until the CYW43439 is wired up for this
 `system/cpuload` and `system/stackmonitor` need kernel options rather than plain application options:
 `SCHED_CPULOAD_SYSCLK` in place of `SCHED_CPULOAD_NONE`, and `STACK_COLORATION`. Neither is verified on this
 board. Kernel options carry more risk than application options, so enable them one at a time.
+
+### Wireless
+
+Scanning works. Bluetooth does not, because NuttX has no CYW43439 Bluetooth driver at all, only the Wi-Fi one
+at `arch/arm/src/rp23xx/rp23xx_cyw43439.c`.
+
+Three pieces are needed, none of which upstream provides for this board:
+
+1. `patches/nuttx/0001-raspberrypi-pico-2-cyw43439-wireless.patch` adds the four `GPIO_CYW43439_*` pins, the
+   `rp23xx_cyw_setup()` call in `rp23xx_bringup.c`, `include/rp23xx_extra_gpio.h`, and the firmware staging
+   rules. The pins are 23 for power, 24 for data, 25 for chip select, and 29 for the clock, the same as every
+   Pico W. `nuttx-configure` and `nuttx-configure-saved` apply it, so it is hard to forget. `make nuttx-patch`
+   applies it on its own and is idempotent, and `make nuttx-unpatch` removes it.
+2. The firmware blob. `make cyw43-firmware` converts the C array in
+   `external/pico-sdk/lib/cyw43-driver/firmware/w43439A0_7_95_49_00_combined.h` into the 225240 byte binary
+   NuttX expects, at `build/cyw43439-firmware.bin`. The configuration finds it through `PLAYGROUND_ROOT`,
+   which the dev shell exports, so no saved defconfig carries a machine specific path and the pico-sdk
+   submodule stays clean.
+3. The `cyw43-driver` submodule, which is nested inside pico-sdk. `make submodules` fetches it.
+
+Bring the interface up by hand, because the saved configuration leaves `CONFIG_NSH_NETINIT` off so that a
+wireless problem cannot cost the shell:
+
+```
+ifup wlan0
+wapi scan wlan0
+```
+
+`ifup` is what downloads the firmware to the chip, which takes a moment. After it, `ifconfig` reports a real
+MAC address read from the chip rather than all zeros, and `wapi scan wlan0` lists access points with their
+signal levels. Associating needs `wapi psk`, `wapi essid`, and `renew wlan0`.
+
+Two silent failures are guarded against, because both produce an image that builds, flashes, and boots while
+the radio never works:
+
+- A missing firmware file makes the NuttX board build substitute a five byte dummy. `make nuttx-build` reads
+  the path out of `.config` and checks the file, and stops if it is missing or implausibly small.
+- An unpatched tree makes Kconfig drop `CONFIG_RP23XX_INFINEON_CYW43439` without a word, since the symbol is
+  defined only by the patch. The driver still compiles, but nothing registers `wlan0`. The build checks for
+  the board symbol whenever the driver symbol is set, and says which command to run.
+
+### Wireless Stability Is Unproven
+
+Scanning works, but the board stopped responding some time after `ifup wlan0` and `wapi scan wlan0`. The USB
+device stayed enumerated while writes to it timed out, which means the firmware stopped servicing USB rather
+than the console session ending. A power cycle recovers it. Which step is responsible is not yet established,
+so the sequence to isolate it is to bring the interface up, wait, and check the shell still answers before
+scanning.
+
+Enabling wireless disables both LED drivers, because the LED hangs off the wireless chip rather than an RP2350
+pin and GPIO 25 is the chip select. Driving it needs the gSPI based user LED driver that
+`pimoroni-pico-plus-2-w` carries, which this patch does not port.
+
+The network stack is not free. `bss` grows from about 9 KB to 108 KB, mostly the 196 IOB buffers, leaving
+roughly 410 KB of heap instead of 507 KB. Flash use reaches 508864 bytes, which still clears the littlefs
+region at `0x100000`.

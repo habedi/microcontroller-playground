@@ -5,6 +5,10 @@ board build wants the same bytes as a file, and it quietly writes a file
 containing the word "dummy" when the path is missing, which produces an image
 that flashes and runs but never talks to the wireless chip. Generating the blob
 here keeps that from happening silently.
+
+The output goes under build/ rather than next to the header, so that the
+pico-sdk submodule stays clean. The NuttX configuration finds it through
+PLAYGROUND_ROOT, which the Nix dev shell exports.
 """
 
 import argparse
