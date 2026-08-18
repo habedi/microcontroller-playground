@@ -212,6 +212,97 @@ the radio never works:
   defined only by the patch. The driver still compiles, but nothing registers `wlan0`. The build checks for
   the board symbol whenever the driver symbol is set, and says which command to run.
 
+### Wireless Does Not Survive a Cold Boot
+
+The wireless image works after a flash and fails after a power cycle:
+
+| Image              | After a flash | After a power cycle          |
+| ------------------ | ------------- | ---------------------------- |
+| `usbnsh-littlefs`  | works         | works                        |
+| `usbnsh-wifi`      | works         | USB enumerates, console dead |
+
+In the failing state the USB device stays enumerated and the host can write to
+it, so the firmware runs and services USB, but nothing answers on the console:
+no prompt, no echo, nothing across fifteen seconds of listening and eight
+Enters. A flash recovers it, because that ends in a warm reset.
+
+The suspected cause is `rp23xx_cyw_setup()`, which the patch calls from
+`rp23xx_bringup()` before NSH starts. A warm reset leaves the CYW43439 powered
+and initialized from the previous run, while a cold start does not, so a probe
+that blocks would stall bringup and never reach the shell. This is not proven,
+because a cold boot in that state produces no output at all to diagnose from.
+
+Test wireless changes by pulling the USB cable and reconnecting, not by
+flashing. Flashing hides this entire class of failure.
+
+### There Is No SD Card Slot
+
+The board has no card socket. The `spisd` configuration drives an external microSD breakout over SPI0, so it
+needs a module and wiring before it does anything. It sets `CONFIG_MMCSD`, `CONFIG_FS_FAT`, and
+`CONFIG_RP23XX_SPISD`, and expects these pins:
+
+| Signal    | GPIO |
+| --------- | ---- |
+| SCK       | GP2  |
+| TX (MOSI) | GP3  |
+| RX (MISO) | GP4  |
+| CS        | GP5  |
+
+The module also needs 3V3 and ground.
+
+### Adding More Tools
+
+NuttX has its own versions of some familiar commands, in `external/nuttx-apps`. `system/vi`, `system/curl`,
+`system/tcpdump`, `system/cpuload`, `system/stackmonitor`, `netutils/webclient`, and `netutils/dropbear` are
+all there, along with `ping`, `telnet`, and `netcat`. There is no `grep`, `find`, `sed`, or `awk` anywhere in
+the tree.
+
+Anything that needs a network is blocked until the CYW43439 is wired up for this board.
+
+`system/cpuload` and `system/stackmonitor` need kernel options rather than plain application options:
+`SCHED_CPULOAD_SYSCLK` in place of `SCHED_CPULOAD_NONE`, and `STACK_COLORATION`. Neither is verified on this
+board. Kernel options carry more risk than application options, so enable them one at a time.
+
+### Wireless
+
+Scanning works. Bluetooth does not, because NuttX has no CYW43439 Bluetooth driver at all, only the Wi-Fi one
+at `arch/arm/src/rp23xx/rp23xx_cyw43439.c`.
+
+Three pieces are needed, none of which upstream provides for this board:
+
+1. `patches/nuttx/0001-raspberrypi-pico-2-cyw43439-wireless.patch` adds the four `GPIO_CYW43439_*` pins, the
+   `rp23xx_cyw_setup()` call in `rp23xx_bringup.c`, `include/rp23xx_extra_gpio.h`, and the firmware staging
+   rules. The pins are 23 for power, 24 for data, 25 for chip select, and 29 for the clock, the same as every
+   Pico W. `nuttx-configure` and `nuttx-configure-saved` apply it, so it is hard to forget. `make nuttx-patch`
+   applies it on its own and is idempotent, and `make nuttx-unpatch` removes it.
+2. The firmware blob. `make cyw43-firmware` converts the C array in
+   `external/pico-sdk/lib/cyw43-driver/firmware/w43439A0_7_95_49_00_combined.h` into the 225240 byte binary
+   NuttX expects, at `build/cyw43439-firmware.bin`. The configuration finds it through `PLAYGROUND_ROOT`,
+   which the dev shell exports, so no saved defconfig carries a machine specific path and the pico-sdk
+   submodule stays clean.
+3. The `cyw43-driver` submodule, which is nested inside pico-sdk. `make submodules` fetches it.
+
+Bring the interface up by hand, because the saved configuration leaves `CONFIG_NSH_NETINIT` off so that a
+wireless problem cannot cost the shell:
+
+```
+ifup wlan0
+wapi scan wlan0
+```
+
+`ifup` is what downloads the firmware to the chip, which takes a moment. After it, `ifconfig` reports a real
+MAC address read from the chip rather than all zeros, and `wapi scan wlan0` lists access points with their
+signal levels. Associating needs `wapi psk`, `wapi essid`, and `renew wlan0`.
+
+Two silent failures are guarded against, because both produce an image that builds, flashes, and boots while
+the radio never works:
+
+- A missing firmware file makes the NuttX board build substitute a five byte dummy. `make nuttx-build` reads
+  the path out of `.config` and checks the file, and stops if it is missing or implausibly small.
+- An unpatched tree makes Kconfig drop `CONFIG_RP23XX_INFINEON_CYW43439` without a word, since the symbol is
+  defined only by the patch. The driver still compiles, but nothing registers `wlan0`. The build checks for
+  the board symbol whenever the driver symbol is set, and says which command to run.
+
 ### Wireless Stability Is Unproven
 
 Scanning works, but the board stopped responding some time after `ifup wlan0` and `wapi scan wlan0`. The USB
