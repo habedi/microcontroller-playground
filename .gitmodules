@@ -14,3 +14,6 @@
 	path = external/crosstool-ng
 	url = https://github.com/espressif/crosstool-NG
 	shallow = true
+[submodule "external/esp-idf"]
+	path = external/esp-idf
+	url = https://github.com/espressif/esp-idf

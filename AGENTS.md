@@ -50,10 +50,14 @@ External code lives in git submodules under `external/`. It is never copied into
 - `external/nuttx`: the Apache NuttX RTOS kernel and build system.
 - `external/nuttx-apps`: the NuttX applications tree. The build expects it next to the kernel.
 - `external/pico-sdk`: the Raspberry Pi Pico SDK. The NuttX rp23xx port builds against it through `PICO_SDK_PATH`.
+- `external/esp-idf`: the Espressif IoT Development Framework, pinned at v5.5.5. It is the vendor SDK for the ESP32 chips and builds on FreeRTOS. It
+  carries its own submodules, so it needs a recursive fetch, and its compilers are prebuilt downloads rather than Nix packages. `make espidf-install`
+  places them under `build/espressif` instead of the home directory.
 - `external/crosstool-ng`: the Espressif fork of crosstool-NG. It can build a bare-metal RISC-V toolchain for the Espressif chips. The dev shell
   builds its own compiler through the flake instead, so this submodule is a fallback rather than part of the normal setup.
 
-After cloning, run `git submodule update --init --depth 1` to fetch them.
+After cloning, run `make submodules` to fetch them. A plain `git submodule update --init --depth 1` misses the nested submodules that the Pico SDK
+and ESP-IDF need.
 
 Python tools are managed by uv through `pyproject.toml`. That is where `esptool` and `pre-commit` come from. Run them as `uv run esptool` and
 `uv run pre-commit`, or from the uv-created virtual environment. Do not install Python tools with pip into the system interpreter.

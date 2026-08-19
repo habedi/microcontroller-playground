@@ -1,0 +1,8 @@
+# The board's USB-C connector goes to the chip's own USB Serial/JTAG
+# controller, and no UART adapter is wired to GPIO37 and GPIO38, so the
+# default UART console would produce no output here.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# PSRAM is left off. It faults on this chip revision, under ESP-IDF as well
+# as under NuttX. See docs/esp32p4.md.
+CONFIG_SPIRAM=n

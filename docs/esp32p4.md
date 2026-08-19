@@ -11,7 +11,8 @@ See [raspberrypi-pico-2.md](raspberrypi-pico-2.md).
 
 ### Silicon Revision
 
-This sample reports revision v1.3.
+The board is an ESP32-P4-Function-EV-Board v1.5.2 and the chip on it reports revision v1.3. Those are two
+separate things, the printed circuit board and the die, and both numbers belong in a bug report.
 NuttX supports v3.0 and above, and the stock configuration compiles a revision check that calls `PANIC()` on anything older.
 Two options bypass it:
 
@@ -139,6 +140,38 @@ draining. With `CONFIG_DEBUG_*` enabled the board dies before the console is att
 the boot proceed further. The bound is a candidate patch for upstream.
 
 The consequence is that panics, assertions, and syslog produce no output on this board.
+
+### PSRAM Is Broken on This Revision
+
+Enabling PSRAM crashes this board, and not only under NuttX. An ESPHome report against the same
+ESP32-P4-Function-EV-Board v1.5.2 with the same chip revision v1.3 and the same
+`ESP-ROM:esp32p4-eco2-20240710` describes a load access fault at `0x5008e1a0`, inside the PSRAM controller
+register space, whenever any PSRAM configuration is present. That is with ESP-IDF 5.5.4, across 20, 100, and
+200 MHz settings, and with the pre-production silicon flag already set. See
+https://github.com/esphome/esphome/issues/16903.
+
+Neither the stock `usbconsole` configuration nor the saved `usbconsole-rev1` enables PSRAM, so this is not the
+cause of the hang described above. It matters for two other reasons.
+
+The board's 32 MB of PSRAM is unusable for now, whatever the software. Anything wanting large buffers, such as
+a framebuffer or an audio pipeline, has to fit in internal RAM instead.
+
+Powering PSRAM on this board goes through an internal LDO, which the ESPHome configuration sets as channel 3
+at 2.5 V. A port that omits that setup would fail in much this way, so the LDO is the first thing to check if
+PSRAM is ever attempted here.
+
+### ESP-IDF Reportedly Works on This Board
+
+The same report states that without PSRAM the board "boots and runs perfectly including WiFi, HA API, I2C, and
+touch detection" under ESP-IDF. That is the vendor stack reaching a working system on this exact board and
+revision, while the NuttX build here cannot reach a shell.
+
+The balance of evidence therefore points at the NuttX port rather than the silicon, and it makes ESP-IDF the
+higher-probability route to a usable board. Adding it would follow the convention for a new SDK: a submodule
+under `external/`, its own prefixed Makefile targets, and its own subdirectory under `configs/`.
+
+Two independent projects need an explicit switch for this silicon, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` in
+NuttX and `engineering_sample: true` in ESPHome, which is a fair measure of how much the revision matters.
 
 ### Next Step
 

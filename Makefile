@@ -23,6 +23,31 @@ SAVED_CONFIG   ?=
 SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
 NUTTX_APPS_DIR ?= ../nuttx-apps
 
+# The Pico SDK, a second SDK alongside NuttX. A project is any directory with a
+# CMakeLists.txt, so PICOSDK_SRC points at one under experiments/.
+PICOSDK_DIR    ?= external/pico-sdk
+PICOSDK_BOARD  ?= pico2_w
+PICOSDK_SRC    ?= experiments/picosdk-hello
+PICOSDK_BUILD  ?= build/picosdk/$(notdir $(PICOSDK_SRC))
+
+# ESP-IDF, the Espressif SDK. It is the practical option for the ESP32-P4,
+# whose NuttX console does not reach a shell. IDF_TOOLS_PATH keeps the
+# downloaded toolchains inside the repository rather than in the home
+# directory, so a clean checkout is self contained.
+ESPIDF_DIR    ?= external/esp-idf
+ESPIDF_TOOLS  ?= $(CURDIR)/build/espressif
+ESPIDF_TARGET ?= esp32p4
+ESPIDF_SRC    ?= experiments/espidf-hello
+ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
+ESPIDF_PORT   ?= /dev/ttyACM0
+
+# idf.py writes the resolved sdkconfig next to the project by default. Sending
+# it to the build directory keeps generated files out of the repository, at the
+# cost of losing menuconfig edits on espidf-distclean. sdkconfig.defaults in
+# the project directory is the file to edit for changes worth keeping.
+ESPIDF_ARGS   ?= -C $(ESPIDF_SRC) -B $(ESPIDF_BUILD) \
+                 -D SDKCONFIG=$(ESPIDF_BUILD)/sdkconfig
+
 # The CYW43439 blob that a wireless build embeds. The NuttX board build writes
 # a dummy in its place when it is missing, and the resulting image runs but
 # never talks to the wireless chip, so the build checks for it.
@@ -100,6 +125,7 @@ setup-udev: ## Install the picotool udev rules, so flash-pico runs without sudo
 submodules: ## Fetch the git submodules under external/
 	git submodule update --init --depth 1
 	git -C external/pico-sdk submodule update --init --depth 1 lib/cyw43-driver
+	git -C external/esp-idf submodule update --init --recursive --depth 1
 
 .PHONY: install
 install: ## Install the uv-managed Python tools (like esptool and pre-commit)
@@ -213,6 +239,65 @@ nuttx-distclean: ## Reset the NuttX tree; run it before switching boards
 .PHONY: nuttx-flash-esp
 nuttx-flash-esp: ## Flash the NuttX image to an Espressif board over PORT
 	$(MAKE) -C $(NUTTX_DIR) flash ESPTOOL_PORT=$(PORT) $(NUTTX_MAKE_ARGS)
+
+# Pico SDK. Bare metal C and C++ on the RP2350, with the wireless, Bluetooth,
+# TCP/IP, and USB stacks the SDK bundles.
+.PHONY: picosdk-configure
+picosdk-configure: ## Configure a Pico SDK project (PICOSDK_SRC=<dir>)
+	@test -f "$(PICOSDK_SRC)/CMakeLists.txt" || { \
+		echo "$(PICOSDK_SRC) has no CMakeLists.txt."; \
+		echo "Set PICOSDK_SRC to a project directory under experiments/."; \
+		exit 1; }
+	cmake -G Ninja -S $(PICOSDK_SRC) -B $(PICOSDK_BUILD) \
+		-DPICO_BOARD=$(PICOSDK_BOARD)
+
+.PHONY: picosdk-build
+picosdk-build: ## Build the configured Pico SDK project
+	@test -f "$(PICOSDK_BUILD)/build.ninja" || { \
+		echo "$(PICOSDK_BUILD) is not configured. Run make picosdk-configure."; \
+		exit 1; }
+	cmake --build $(PICOSDK_BUILD)
+
+.PHONY: picosdk-distclean
+picosdk-distclean: ## Remove the Pico SDK build directory
+	rm -rf $(PICOSDK_BUILD)
+
+.PHONY: espidf-install
+espidf-install: ## Install the ESP-IDF toolchains for ESPIDF_TARGET
+	@test -f "$(ESPIDF_DIR)/install.sh" || { \
+		echo "$(ESPIDF_DIR) is empty. Run make submodules first."; \
+		exit 1; }
+	IDF_TOOLS_PATH=$(ESPIDF_TOOLS) $(ESPIDF_DIR)/install.sh $(ESPIDF_TARGET)
+
+.PHONY: espidf-build
+espidf-build: ## Build an ESP-IDF project (ESPIDF_SRC=<dir>)
+	@test -f "$(ESPIDF_SRC)/CMakeLists.txt" || { \
+		echo "$(ESPIDF_SRC) has no CMakeLists.txt."; \
+		echo "Set ESPIDF_SRC to a project directory under experiments/."; \
+		exit 1; }
+	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
+		. $(ESPIDF_DIR)/export.sh >/dev/null && \
+		if test -f $(ESPIDF_BUILD)/sdkconfig; then \
+			idf.py $(ESPIDF_ARGS) build; \
+		else \
+			idf.py $(ESPIDF_ARGS) set-target $(ESPIDF_TARGET) build; \
+		fi'
+
+.PHONY: espidf-flash
+espidf-flash: ## Flash the built ESP-IDF project over ESPIDF_PORT
+	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
+		. $(ESPIDF_DIR)/export.sh >/dev/null && \
+		idf.py $(ESPIDF_ARGS) -p $(ESPIDF_PORT) flash'
+
+.PHONY: espidf-monitor
+espidf-monitor: ## Open the ESP-IDF serial monitor on ESPIDF_PORT
+	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
+		. $(ESPIDF_DIR)/export.sh >/dev/null && \
+		idf.py $(ESPIDF_ARGS) -p $(ESPIDF_PORT) monitor'
+
+.PHONY: espidf-distclean
+espidf-distclean: ## Remove the ESP-IDF build directory
+	rm -rf $(ESPIDF_BUILD)
 
 # Flashing and the serial console (OS-agnostic)
 .PHONY: flash-pico
