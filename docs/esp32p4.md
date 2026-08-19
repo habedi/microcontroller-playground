@@ -5,9 +5,13 @@ onboard ESP32-C6 wireless coprocessor.
 
 ### Status
 
-The board boots NuttX and prints through the boot sequence. It does not reach a NuttShell prompt, so it is not usable yet.
-The Raspberry Pi Pico 2 is the board that works over USB alone.
-See [raspberrypi-pico-2.md](raspberrypi-pico-2.md).
+The board runs both stacks. NuttX reaches an interactive NuttShell prompt when the console is on UART0, read
+over the board's onboard CH343 bridge, and ESP-IDF v5.5.5 runs and prints over the same cable. The saved
+configuration is `configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
+
+Only the USB Serial/JTAG console is broken. The `usbconsole` configuration still stops while attaching the
+console interrupt, and the same image with the console moved to UART0 boots to a prompt, which locates the
+fault in that driver rather than in the port as a whole or in the silicon.
 
 ### Silicon Revision
 
@@ -40,9 +44,28 @@ THIS MAY NOT WORK! DON'T USE THIS CHIP IN PRODUCTION!
 
 ### Serial Port
 
-The USB-C connector goes to the chip's own USB Serial/JTAG controller, so the board appears as `/dev/ttyACM0`,
-not `/dev/ttyUSB0`. Flash it with `make nuttx-flash-esp PORT=/dev/ttyACM0`. A board with a CP2102 bridge
-appears as `/dev/ttyUSB0` instead.
+The board has two USB-C connectors, and both appear as `/dev/ttyACM0`, so the name alone does not say which one
+is in use. Tell them apart by USB vendor:
+
+```shell
+udevadm info -q property -n /dev/ttyACM0 | grep ID_VENDOR_ID
+```
+
+`303a` is Espressif, meaning the connector wired to the chip's own USB Serial/JTAG controller. `1a86` is
+QinHeng, meaning the onboard WCH CH343 bridge, which reports as `USB Single Serial` with product ID `55d3`.
+
+The CH343 sits on UART0, which ESP-IDF confirms at boot:
+
+```
+I (163) cpu_start: GPIO 38 and 37 are used as console UART I/O pins
+```
+
+Those are the pins the notes below once said needed an external USB to UART adapter. The board already carries
+one, so no extra hardware is required for a UART0 console.
+
+Either connector flashes the chip, because the ROM download mode listens on UART0 as well as on USB
+Serial/JTAG. Flash with `make nuttx-flash-esp PORT=/dev/ttyACM0`. A board with a CP2102 bridge appears as
+`/dev/ttyUSB0` instead.
 
 ### Where the Boot Stops
 
@@ -167,15 +190,82 @@ touch detection" under ESP-IDF. That is the vendor stack reaching a working syst
 revision, while the NuttX build here cannot reach a shell.
 
 The balance of evidence therefore points at the NuttX port rather than the silicon, and it makes ESP-IDF the
-higher-probability route to a usable board. Adding it would follow the convention for a new SDK: a submodule
-under `external/`, its own prefixed Makefile targets, and its own subdirectory under `configs/`.
+higher-probability route to a usable board.
 
 Two independent projects need an explicit switch for this silicon, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` in
 NuttX and `engineering_sample: true` in ESPHome, which is a fair measure of how much the revision matters.
 
+### ESP-IDF Runs on This Board
+
+ESP-IDF v5.5.5 is a submodule at `external/esp-idf`, with `espidf-` prefixed Makefile targets and a smallest
+program at [../experiments/espidf-hello](../experiments/espidf-hello). It builds, flashes, and runs. The
+console output over the CH343 bridge:
+
+```
+I (192) efuse_init: Min chip rev:     v1.0
+I (196) efuse_init: Max chip rev:     v1.99
+I (200) efuse_init: Chip rev:         v1.3
+I (288) main_task: Calling app_main()
+espidf-hello on chip revision v1.3, 2 cores
+free heap: 600124 bytes
+tick 0
+```
+
+Both cores come up, the scheduler runs, and 586 KB of heap is available without PSRAM, spread across
+retention RAM, ordinary RAM, RTC RAM, and the SPM region. This settles the question the NuttX work could not:
+the silicon boots to a working multicore system, so the NuttX hang is a port defect.
+
+The revision options carry the same names as in NuttX, because NuttX took them from here:
+
+```
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+```
+
+ESP-IDF defaults to `CONFIG_ESP32P4_REV_MIN_301`, and its bootloader rejects an image whose minimum revision
+is above the chip's. The two options together move the accepted window to v1.0 through v1.99, which contains
+v1.3. The Kconfig help states that revisions below v3.0 and revisions from v3.0 up have large hardware
+differences and that support for the two is mutually exclusive, so the option is a fork in the hardware
+abstraction layer rather than a relaxed check.
+
+The console needs `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, since ESP-IDF puts the console on UART0 by default
+and nothing is attached to GPIO37 and GPIO38 yet.
+
+The compilers are prebuilt downloads rather than Nix packages, and `make espidf-install` places them under
+`build/espressif` rather than in `~/.espressif`. That is about 2.6 GB. The compiler is
+`riscv32-esp-elf-gcc 14.2.0` from release `esp-14.2.0_20260121`, which is the release CI installs for the
+NuttX job on this board, so both paths use one compiler version.
+
+### NuttShell over UART0
+
+The stock `esp32p4-function-ev-board:nsh` configuration puts the console on UART0 at 115200 baud and enables no
+USB serial driver. With the two revision options added, it boots to a prompt:
+
+```
+NuttShell (NSH)
+nsh> uname -a
+NuttX 0.0.0 2b5509e4-dirty Jan  1 1980 00:00:00 risc-v esp32p4-function-ev-board
+```
+
+```shell
+make nuttx-distclean
+make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1
+make nuttx-build
+make nuttx-flash-esp PORT=/dev/ttyACM0
+make console TTY=/dev/ttyACM0
+```
+
+The shell reports 217 KB of free heap and holds two tasks, the idle task and `nsh_main`. `/dev` carries
+`console`, `null`, `random`, `ttyS0`, and `zero`. There is no filesystem beyond that yet, and no radio, since
+the wireless parts belong to the onboard ESP32-C6.
+
+ESP-IDF reports 586 KB of free heap on the same silicon, against 217 KB here. The difference is configuration
+rather than hardware, since this image is a plain `nsh` with no PSRAM and a small heap region.
+
 ### Next Step
 
-Move the console to UART0, on GPIO37 for transmit and GPIO38 for receive, and read it with a USB to UART
-adapter. That restores a working `up_putc`, making panics and assertions visible, and removes the USB
-Serial/JTAG driver from the picture. The adapter must drive 3.3V logic, since a 5V-only one can damage the
-pins. The stock `esp32p4-function-ev-board:nsh` configuration puts the console on UART0.
+Add a filesystem and the tools that make the shell useful, following what the Pico 2 already has. The saved
+`nsh-rev1` configuration is the base to build on.
+
+The USB Serial/JTAG console remains broken and is worth reporting upstream. The unbounded spin in
+`esp_usbserial_write()` is one defect, and the boot stopping while attaching interrupt source 22 is the other.

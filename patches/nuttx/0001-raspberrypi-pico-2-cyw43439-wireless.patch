@@ -3,9 +3,9 @@ index 9efb73ef..7fbe883c 100644
 --- a/boards/arm/rp23xx/raspberrypi-pico-2/Kconfig
 +++ b/boards/arm/rp23xx/raspberrypi-pico-2/Kconfig
 @@ -5,4 +5,41 @@
-
+ 
  if ARCH_BOARD_RASPBERRYPI_PICO_2
-
+ 
 +menuconfig RP23XX_INFINEON_CYW43439
 +	bool "Has Infineon cyw43439 WiFi chip"
 +	depends on IEEE80211_INFINEON_CYW43439
@@ -196,7 +196,7 @@ index bde8c621..9d601087 100644
 @@ -27,11 +27,17 @@ ifeq ($(CONFIG_DEV_GPIO),y)
  CSRCS += rp23xx_gpio.c
  endif
-
+ 
 +# On the W variants the onboard LED hangs off the CYW43439 rather than an
 +# RP2350 pin, so neither LED driver applies.  Driving it would mean a gSPI
 +# transaction, which board_autoled_on() cannot do from interrupt context.
@@ -208,7 +208,7 @@ index bde8c621..9d601087 100644
  CSRCS += rp23xx_userleds.c
  endif
 +endif
-
+ 
  ifeq ($(CONFIG_ARCH_BUTTONS),y)
    CSRCS += rp23xx_buttons.c
 @@ -44,3 +50,30 @@ endif
@@ -247,7 +247,7 @@ index 6bb7db26..8708ce4f 100644
 --- a/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_bringup.c
 +++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_bringup.c
 @@ -35,12 +35,24 @@
-
+ 
  #ifdef CONFIG_ARCH_BOARD_COMMON
  #include "rp23xx_common_bringup.h"
 +
@@ -255,11 +255,11 @@ index 6bb7db26..8708ce4f 100644
 +#  include "rp23xx_cyw43439.h"
 +#endif
  #endif /* CONFIG_ARCH_BOARD_COMMON */
-
+ 
  #ifdef CONFIG_USERLED
  #  include <nuttx/leds/userled.h>
  #endif
-
+ 
 +/****************************************************************************
 + * Public Data
 + ****************************************************************************/
@@ -274,7 +274,7 @@ index 6bb7db26..8708ce4f 100644
 @@ -84,5 +96,24 @@ int rp23xx_bringup(void)
      }
  #endif
-
+ 
 +#ifdef CONFIG_RP23XX_INFINEON_CYW43439
 +  /* Bring up the CYW43439 wireless chip.  This registers the wlan0 network
 +   * device.  The chip's firmware is not downloaded until wlan0 is brought up.
@@ -301,9 +301,9 @@ index 75dfcce8..4c7d7f95 100644
 --- a/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_pico.h
 +++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_pico.h
 @@ -27,9 +27,29 @@
-
+ 
  #include <nuttx/config.h>
-
+ 
 -/* LEDs */
 +/* CYW43439 wireless chip, on the Pico 2 W and Pico 2 WH
 + *
@@ -317,7 +317,7 @@ index 75dfcce8..4c7d7f95 100644
 +#define GPIO_CYW43439_CS      25  /* Drive low to select the chip      */
 +#define GPIO_CYW43439_CLOCK   29  /* gSPI clock                        */
 +#endif
-
+ 
 +/* LEDs
 + *
 + * On the plain Pico 2 the onboard LED is on GPIO 25.  On the W variants that
@@ -328,5 +328,6 @@ index 75dfcce8..4c7d7f95 100644
 +#ifndef CONFIG_RP23XX_INFINEON_CYW43439
  #define GPIO_LED1       25 /* The board's LED is connected to this pin */
 +#endif
-
+ 
  /* Buttons */
+ 

@@ -21,8 +21,11 @@ The boards connect over USB to a Linux development machine, on either amd64 or a
 - ESP32-P4 development board with 32 MB of PSRAM and headers. The ESP32-P4 is a dual-core RISC-V application processor with no radio. The board
   pairs it with an onboard ESP32-C6, which acts as a wireless coprocessor and provides Wi-Fi 6 and Bluetooth LE. This sample is silicon revision
   v1.3, below the v3.0 that NuttX supports, so it needs `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and
-  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. It boots NuttX with those set, but its USB console does not reach a shell prompt, so
-  the board needs a USB to UART adapter on GPIO37 and GPIO38 before it is usable.
+  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. With those set it reaches a NuttShell prompt when the console is on UART0, and it also
+  runs ESP-IDF. Only the USB Serial/JTAG console is broken, so use the UART one. It has two USB-C connectors: one goes to the chip's
+  own USB Serial/JTAG controller, and the other goes to an onboard WCH CH343 bridge on UART0, meaning GPIO37 and GPIO38. Both enumerate as
+  `/dev/ttyACM0`, so identify them by USB vendor, `303a` for Espressif and `1a86` for the bridge. The bridge gives a UART0 console with no extra
+  hardware.
 - Raspberry Pi Pico 2 WH: an RP2350 board with headers and a wireless module. The RP2350 has both Arm Cortex-M33 and RISC-V Hazard3 cores. The
   NuttX port targets the Cortex-M33 cores. The NuttX board is `raspberrypi-pico-2`, since the tree has no `-w` variant, and it runs correctly on the
   WH with the wireless module unused. The `usbnsh` configuration gives a NuttShell over the USB cable, which makes this the board that currently
@@ -97,8 +100,8 @@ unnecessary.
 Flashing depends on the chip family:
 
 - Espressif boards flash over the USB serial port with esptool. Use the NuttX `make flash ESPTOOL_PORT=<port>` target, or run `uv run esptool`
-  directly. The port depends on the board. The ESP32-P4 development board wires its USB-C connector to the chip's own USB Serial/JTAG controller, so
-  it appears as `/dev/ttyACM0`. Boards that use a CP2102 bridge appear as `/dev/ttyUSB0` instead. The first flash of a chip also needs the bootloader,
+  directly. The port depends on the board. Either ESP32-P4 connector works for flashing, since the ROM download mode listens on UART0 as well as on
+  USB Serial/JTAG, and both appear as `/dev/ttyACM0`. Boards that use a CP2102 bridge appear as `/dev/ttyUSB0` instead. The first flash of a chip also needs the bootloader,
   which the NuttX build downloads or builds for you.
 - The Pico 2 flashes in BOOTSEL mode, either with `make flash-pico-uf2`, which copies `nuttx.uf2` to the drive the board exposes and needs no special
   permissions, or with `make flash-pico`, which uses `picotool` and needs the udev rules that `make setup-udev` installs once. Getting into BOOTSEL

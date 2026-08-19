@@ -1,6 +1,8 @@
 default_stages: [ pre-push ]
 fail_fast: false
-exclude: '(^external/|^docs/)'
+# patches/ is excluded because a unified diff encodes a blank context line as a
+# single space, and trailing-whitespace strips it, which corrupts the patch.
+exclude: '(^external/|^docs/|^patches/)'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
