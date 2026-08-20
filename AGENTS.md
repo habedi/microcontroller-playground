@@ -216,6 +216,27 @@ The boards are the test bench for everything else. Before committing a change:
 2. The image was flashed and seen running on the real board, and the notes say so.
 3. Nothing under `external/` was modified, and no build output is staged. Check the nested HAL repository as well as the submodules themselves.
 
+## Privacy
+
+This repository is public, so anything committed is published.
+The rules below are about everything that describes the person or the machine instead.
+
+- No absolute paths. Use `PLAYGROUND_ROOT` for a path inside this repository, which the dev shell exports, and
+  never write a home directory or a Nix store path into a saved configuration, a Makefile, or a document. Saved
+  defconfigs get checked for this, since `savedefconfig` will happily record whatever was in `.config`.
+- No hardware identifiers. Chip MAC addresses, eFuse contents, and USB serial numbers of adapters all identify a
+  specific device. Read them at the console when needed and leave them there.
+- No wireless survey data. Access point names from a scan identify a location, so record that `wapi scan` works
+  and what it reports, not its output. Network names and pre-shared keys never belong in a file.
+- No purchasing or personal notes. Shopping lists, prices, and plans go in a file matching `*.local.md`, which
+  `.gitignore` covers with a generic pattern so the rule does not name what it hides.
+- Selected console output only. Quote the lines that carry the technical point rather than pasting a whole
+  capture, since a full boot log or shell session tends to carry identifiers nobody intended to publish.
+
+Before committing, a scan of the tracked files outside `external/` for home directories, MAC addresses, and
+network names costs a few seconds and is worth doing whenever a change touches documentation or saved
+configurations.
+
 ## Commit Hygiene
 
 - Keep commits scoped to one logical change, and keep a submodule version bump as its own commit.
