@@ -405,7 +405,42 @@ image runs correctly.
 
 The three-line chip revision warning is the bypassed `PANIC()` announcing itself and is also expected.
 
+### Wireless Needs the C6, and the C6 Needs New Firmware
+
+The P4 has no radio, so Wi-Fi and Bluetooth mean driving the onboard ESP32-C6 over SDIO. Under NuttX there is no
+path at all: the `esp32p4-function-ev-board` port has no SDIO host driver, no Kconfig, and no configuration for
+the companion, and the only P4 board in the tree that mentions it is `esp32p4-tab5`, as a pin map.
+
+Under ESP-IDF the path exists and is the vendor's own. Pair two managed components, `esp_wifi_remote` for the
+API and `esp_hosted` for the transport, with `CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y`.
+
+Do not use `CONFIG_ESP_HOST_WIFI_ENABLED`, despite it looking like the obvious switch and despite the P4 being
+the only target that declares the `SOC_WIRELESS_HOST_SUPPORTED` capability it depends on. The component's own
+Kconfig reads:
+
+```
+menuconfig ESP_HOSTED
+	default n if ESP_HOST_WIFI_ENABLED
+	default y if ESP_WIFI_REMOTE_ENABLED && ESP_WIFI_REMOTE_LIBRARY_HOSTED
+```
+
+So enabling it switches ESP-Hosted off. The two are mutually exclusive, and the in-tree one has
+`ESP_WIFI_CONTROLLER_TARGET="esp32"` rather than a C6. It builds cleanly and produces an image that can never
+reach the radio.
+
+With the correct pairing the host side works. The transport picks the right pins unaided, matching Espressif's
+documentation for this board, and then the C6 fails to enumerate as an SDIO card. See
+[../experiments/espidf-wifi](../experiments/espidf-wifi) for the log and for what was ruled out: both 40 and
+20 MHz clocks, and both the 3.0.6 and 2.7.4 host generations.
+
+The C6 ships with slave firmware v0.0.6, which Espressif recommends upgrading. Reflashing it needs a 3.3 V USB
+to UART adapter on the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the
+P4 held in its bootloader. The over-the-air route needs a working link and so cannot bootstrap from here.
+
 ### Next Step
+
+Flash the C6 with current slave firmware once a USB to UART adapter is available. That is the one blocker
+between this board and working Wi-Fi and Bluetooth.
 
 Three defects are worth reporting upstream, all in the NuttX Espressif port rather than in the silicon: the
 unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt source 22 with the USB

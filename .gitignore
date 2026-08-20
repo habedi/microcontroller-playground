@@ -12,6 +12,12 @@ venv/
 # Packaging and distribution files
 .Python
 build/
+
+# ESP-IDF fetches managed components into each project directory, and the path
+# is not configurable. The pin is dependencies.lock, which is committed, so the
+# fetched source stays out of the repository the same way the uv virtual
+# environment does.
+managed_components/
 dist/
 *.egg-info/
 *.egg

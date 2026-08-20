@@ -74,6 +74,12 @@ inspect the dirt deliberately, use `git status --ignore-submodules=none` or run 
 After cloning, run `make submodules` to fetch them. A plain `git submodule update --init --depth 1` misses the nested submodules that the Pico SDK
 and ESP-IDF need.
 
+ESP-IDF pulls some code through its own component manager rather than as a submodule. Those land in
+`managed_components/` inside the project that asked for them, a path ESP-IDF does not let you move. That
+directory is gitignored, and `dependencies.lock` next to it is committed instead, since the lock file is the
+pin and the fetched source is a cache. This follows the same split as `flake.lock` and `uv.lock` against
+`.venv/`. A component belongs in `idf_component.yml`, alongside a comment saying why, not in `external/`.
+
 Python tools are managed by uv through `pyproject.toml`. That is where `esptool` and `pre-commit` come from. Run them as `uv run esptool` and
 `uv run pre-commit`, or from the uv-created virtual environment. Do not install Python tools with pip into the system interpreter.
 
