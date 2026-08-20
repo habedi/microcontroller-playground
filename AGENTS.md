@@ -59,6 +59,18 @@ External code lives in git submodules under `external/`. It is never copied into
 - `external/crosstool-ng`: the Espressif fork of crosstool-NG. It can build a bare-metal RISC-V toolchain for the Espressif chips. The dev shell
   builds its own compiler through the flake instead, so this submodule is a fallback rather than part of the normal setup.
 
+JetBrains IDEs need one manual setting. They detect every nested `.git` directory and register it as its own
+version control root, then group the commit dialog by root, so a node named after a submodule appears there
+holding that submodule's changed files. Committing with it checked creates a commit inside the submodule, which
+the Core Rules forbid. The IDE does not consult `ignore = dirty` when building that list. Remove the
+`external/...` rows under Settings, Version Control, Directory Mappings, leaving only the project root, and
+decline the offer to re-add them when the IDE reports unregistered roots.
+
+Each submodule carries `ignore = dirty` in `.gitmodules`. A configured and built tree is dirty by design, since
+NuttX builds in place and `make nuttx-patch` edits the submodule, so that setting keeps the noise out of
+`git status` while still showing a moved pointer, which is a real change and belongs in its own commit. To
+inspect the dirt deliberately, use `git status --ignore-submodules=none` or run git inside the submodule.
+
 After cloning, run `make submodules` to fetch them. A plain `git submodule update --init --depth 1` misses the nested submodules that the Pico SDK
 and ESP-IDF need.
 

@@ -227,6 +227,18 @@ nuttx-check-toolchain:
 		echo "Enter the Nix dev shell with make shell, or install the system"; \
 		echo "packages with make setup-deps."; \
 		exit 1; }
+	@test "$(NUTTX_ARCH)" = risc-v || exit 0; \
+	std=$$($(NUTTX_CC) -dM -E -x c /dev/null 2>/dev/null | \
+	  sed -n 's/^#define __STDC_VERSION__ \([0-9]*\)L$$/\1/p'); \
+	if test -n "$$std" && test "$$std" -ge 202311; then \
+		echo "$(NUTTX_CC) defaults to C23 (__STDC_VERSION__ $$std)."; \
+		echo "C23 removed ATOMIC_VAR_INIT, which the vendored Espressif HAL"; \
+		echo "still uses, so the build fails inside esp-hal-3rdparty with"; \
+		echo "'initializer element is not constant'. The flake pins GCC 14 for"; \
+		echo "this reason, so this shell predates that pin. Leave it and enter"; \
+		echo "a fresh one with make shell."; \
+		exit 1; \
+	fi
 
 .PHONY: nuttx-build
 nuttx-build: nuttx-check-toolchain ## Build the configured NuttX image

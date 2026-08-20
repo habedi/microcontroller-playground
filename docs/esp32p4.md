@@ -13,6 +13,8 @@ Only the USB Serial/JTAG console is broken. The `usbconsole` configuration still
 console interrupt, and the same image with the console moved to UART0 boots to a prompt, which locates the
 fault in that driver rather than in the port as a whole or in the silicon.
 
+The 32 MB of PSRAM also works, at up to 200 MHz under ESP-IDF.
+
 ### Silicon Revision
 
 The board is an ESP32-P4-Function-EV-Board v1.5.2 and the chip on it reports revision v1.3. Those are two
@@ -143,7 +145,10 @@ stale `esp_rom_clic.o` above arises. An image with an unchanged SHA-256 after a 
 build was skipped, not that it was unnecessary. Run `make nuttx-distclean`, configure again, and build from
 scratch.
 
-### The Board Cannot Report Its Own Failures
+### The USB Console Cannot Report Failures
+
+This applies to the `usbconsole` configuration only. With the console on UART0, panics and assertions print
+normally, so the limitation below is a property of that driver rather than of the board.
 
 In the `usbconsole` configuration all UARTs are disabled, so `CONSOLE_UART` is undefined. `riscv_lowputc()`
 has a `#elif defined(CONFIG_ESPRESSIF_USBSERIAL)` branch that calls `esp_usbserial_write()`, so the path is
@@ -162,38 +167,47 @@ It is reached from `up_putc`, so the first kernel print wedges the CPU whenever 
 draining. With `CONFIG_DEBUG_*` enabled the board dies before the console is attached; bounding the loop lets
 the boot proceed further. The bound is a candidate patch for upstream.
 
-The consequence is that panics, assertions, and syslog produce no output on this board.
+The consequence is that panics, assertions, and syslog produce no output in that configuration.
 
-### PSRAM Is Broken on This Revision
+### PSRAM Works
 
-Enabling PSRAM crashes this board, and not only under NuttX. An ESPHome report against the same
-ESP32-P4-Function-EV-Board v1.5.2 with the same chip revision v1.3 and the same
-`ESP-ROM:esp32p4-eco2-20240710` describes a load access fault at `0x5008e1a0`, inside the PSRAM controller
-register space, whenever any PSRAM configuration is present. That is with ESP-IDF 5.5.4, across 20, 100, and
-200 MHz settings, and with the pre-production silicon flag already set. See
-https://github.com/esphome/esphome/issues/16903.
+The 32 MB of PSRAM works on this board at up to 200 MHz, tested under ESP-IDF v5.5.5 by
+[../experiments/espidf-psram](../experiments/espidf-psram). It needs no settings beyond the two revision
+options, because `CONFIG_SPIRAM=y` and the 200 MHz default are enough:
 
-Neither the stock `usbconsole` configuration nor the saved `usbconsole-rev1` enables PSRAM, so this is not the
-cause of the hang described above. It matters for two other reasons.
+```
+I (162) hex_psram: density      : 0x07 (256 Mbit)
+I (167) hex_psram: good-die     : 0x06 (Pass)
+I (184) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (198) MSPI Timing: Enter psram timing tuning
+I (375) esp_psram: Found 32MB PSRAM device
+I (375) esp_psram: Speed: 200MHz
+I (1327) esp_psram: SPI SRAM memory test OK
+I (1411) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+```
 
-The board's 32 MB of PSRAM is unusable for now, whatever the software. Anything wanting large buffers, such as
-a framebuffer or an audio pipeline, has to fit in internal RAM instead.
+The chip is an AP Memory generation 4 part, 256 Mbit, in X16 mode, reporting `good-die`. Both 20 MHz and
+200 MHz pass, at 200 MHz after timing tuning, and a write-then-verify pattern over 1 MB passes at both. The
+heap allocator gains 33551716 bytes.
 
-Powering PSRAM on this board goes through an internal LDO, which the ESPHome configuration sets as channel 3
-at 2.5 V. A port that omits that setup would fail in much this way, so the LDO is the first thing to check if
-PSRAM is ever attempted here.
+250 MHz is not available on this silicon. Its option carries `depends on !ESP32P4_SELECTS_REV_LESS_V3`, so the
+revision switch that makes the board boot at all also caps PSRAM at 200 MHz. That is the board's rated speed
+regardless.
 
-### ESP-IDF Reportedly Works on This Board
+An ESPHome report against the same board and revision describes a load access fault at `0x5008e1a0`, inside
+the PSRAM controller register space, whenever any PSRAM configuration was present, under ESP-IDF 5.5.4 across
+20, 100, and 200 MHz. See https://github.com/esphome/esphome/issues/16903. That does not reproduce here.
+Whatever the cause was, it was not this revision being incapable of driving its PSRAM.
 
-The same report states that without PSRAM the board "boots and runs perfectly including WiFi, HA API, I2C, and
-touch detection" under ESP-IDF. That is the vendor stack reaching a working system on this exact board and
-revision, while the NuttX build here cannot reach a shell.
+An earlier version of these notes said PSRAM power runs through LDO channel 3 at 2.5 V, taken from that
+report. That was wrong. ESP-IDF puts PSRAM on channel 2 at 1.8 V, declared `range 2 2` with 1800 mV as the
+only voltage, and `ESP_LDO_RESERVE_PSRAM` defaults to enabled, so nothing needs configuring. Channel 3 at
+2.5 V is the MIPI DSI PHY supply, which is a different peripheral.
 
-The balance of evidence therefore points at the NuttX port rather than the silicon, and it makes ESP-IDF the
-higher-probability route to a usable board.
+### The Revision Needs an Explicit Switch Everywhere
 
-Two independent projects need an explicit switch for this silicon, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` in
-NuttX and `engineering_sample: true` in ESPHome, which is a fair measure of how much the revision matters.
+Two independent projects require one for this silicon, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` in NuttX and
+`engineering_sample: true` in ESPHome, which is a fair measure of how much the revision matters.
 
 ### ESP-IDF Runs on This Board
 
@@ -262,10 +276,65 @@ the wireless parts belong to the onboard ESP32-C6.
 ESP-IDF reports 586 KB of free heap on the same silicon, against 217 KB here. The difference is configuration
 rather than hardware, since this image is a plain `nsh` with no PSRAM and a small heap region.
 
+### A Filesystem and Shell Tools
+
+`configs/nuttx/esp32p4-function-ev-board/nsh-tools-rev1` adds littlefs on the internal flash, `vi`, `nxdiag`,
+tab completion, and command history to `nsh-rev1`. None of it needs a patch, since
+`ESPRESSIF_SPIFLASH_LITTLEFS` and its automatic bring-up are already in the board tree:
+
+```
+CONFIG_ESPRESSIF_SPIFLASH=y
+CONFIG_ESPRESSIF_SPIFLASH_AUTO_BRINGUP=y
+CONFIG_ESPRESSIF_SPIFLASH_LITTLEFS=y
+CONFIG_ESPRESSIF_STORAGE_MTD_OFFSET=0x110000
+CONFIG_ESPRESSIF_STORAGE_MTD_SIZE=0xf0000
+```
+
+The image grows from 274676 to 323360 bytes. The filesystem mounts itself at `/data` with 960 KB, and files
+written there survive a reboot:
+
+```
+nsh> mount
+  /data type littlefs
+  /proc type procfs
+nsh> df -h
+  Filesystem      Size      Used  Available Mounted on
+  littlefs        960K        8K       952K /data
+nsh> cat /data/hello.txt
+p4-persistence-test
+```
+
+The flash layout leaves the application at 0x002000, running to about 0x050F60, and the storage partition from
+0x110000 to 0x200000. The 764 KB gap between them comes from the stock `spiflash` configuration and is
+harmless. The partition ends at 2 MB, which is what the image header declares, even though the chip carries
+32 MB.
+
+### PSRAM Under NuttX
+
+NuttX drives the same PSRAM through `CONFIG_ESPRESSIF_SPIRAM`, and it works. The stock `psram_usrheap`
+configuration plus the two revision options is saved as
+`configs/nuttx/esp32p4-function-ev-board/psram-usrheap-rev1`. It also defaults to 200 MHz and runs its own
+boot-time memory test.
+
+PSRAM becomes the user heap while internal RAM stays as the kernel heap, which `free` reports as two regions:
+
+```
+nsh> free
+      total       used       free    maxused    maxfree  nused  nfree name
+     471532       6580     464952       8680     262128     38      3 Kmem
+   33554428       4276   33550152     842496   33550152      8      1 Umem
+```
+
+`Umem` is the full 32 MB. The configuration also builds the `heap` test app, which allocates and frees through
+that pool at addresses in the `0x4800xxxx` range. It completes without reporting a failure, and the `maxused`
+figure of 842496 above is what it peaked at before returning everything, so the pool takes allocation and
+release cleanly rather than merely reporting a size.
+
+This configuration also enables the SPI flash with SmartFS, which is unformatted on a fresh board, so the boot
+prints `Failed to mount the FS volume: -19` and suggests `mksmartfs /dev/smart0`. That is unrelated to PSRAM
+and is fixed by running that command once.
+
 ### Next Step
 
-Add a filesystem and the tools that make the shell useful, following what the Pico 2 already has. The saved
-`nsh-rev1` configuration is the base to build on.
-
-The USB Serial/JTAG console remains broken and is worth reporting upstream. The unbounded spin in
-`esp_usbserial_write()` is one defect, and the boot stopping while attaching interrupt source 22 is the other.
+Report the USB Serial/JTAG defects upstream, which is the one thing on this board still broken. The unbounded
+spin in `esp_usbserial_write()` is one, and the boot stopping while attaching interrupt source 22 is the other.

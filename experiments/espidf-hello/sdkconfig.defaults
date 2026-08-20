@@ -15,6 +15,6 @@ CONFIG_ESP32P4_REV_MIN_100=y
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 
-# PSRAM is left off. It faults on this chip revision, under ESP-IDF as well
-# as under NuttX. See docs/esp32p4.md.
+# PSRAM is left off because this program does not need it, not because it is
+# broken. It works at up to 200 MHz; see experiments/espidf-psram.
 CONFIG_SPIRAM=n
