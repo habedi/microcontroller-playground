@@ -18,6 +18,9 @@ build/
 # fetched source stays out of the repository the same way the uv virtual
 # environment does.
 managed_components/
+
+# Personal working notes
+*.local.md
 dist/
 *.egg-info/
 *.egg
