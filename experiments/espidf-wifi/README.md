@@ -43,8 +43,19 @@ SDIO enumeration rather than anything specific to ESP-Hosted. The C6 is not pres
 
 Clock speed. 40 MHz and 20 MHz fail identically.
 
-Host software generation. `esp_hosted` 3.0.6 and 2.7.4 fail the same way, which is two independent
-implementations reaching the same conclusion.
+Host software generation. Three of them fail identically: `esp_hosted` 3.0.6, 2.7.4, and 1.4.7. The last is
+what Waveshare pins for ESP-IDF 5.x in its own working ESP32-P4 Wi-Fi example, at
+https://github.com/waveshareteam/esp32-p4-platform, paired with `esp_wifi_remote` 0.14.5. Every one of them
+fails on the same call, a CMD52 read of CCCR register `0x3` on function 0, which 1.4.7 turns into an assertion
+and a boot loop:
+
+```
+sdio_wrapper.c line 135, hosted_sdio_card_fn_init
+expression: sdmmc_io_read_byte(card, SDIO_FUNC_0, SD_IO_CCCR_FN_READY, &ior)
+```
+
+Three generations spanning two years of the component's history agree, so this is not a version mismatch on the
+host side.
 
 Configuration. The component sets `RESET_GPIO=54`, SDIO slot 1, 4-bit width, and the correct pins by itself,
 matching the board documentation.
@@ -60,6 +71,13 @@ https://github.com/espressif/esp-hosted-mcu/issues/66,
 https://github.com/espressif/esp-hosted-mcu/issues/167, and
 https://github.com/espressif/arduino-esp32/issues/11404. One report describes a board shipped without the slave
 firmware loaded at all.
+
+### The Cable Diagnoses as Well as Repairs
+
+Wiring a UART to the `PROG_C6` header is worth doing even before flashing anything, because reading the C6's
+own console distinguishes cases that look identical from the P4 side. Silence means the chip is not running.
+A boot log means it runs but is not presenting as an SDIO slave. Either answer narrows the problem in a way
+nothing done from the host can.
 
 ### What Would Unblock It
 

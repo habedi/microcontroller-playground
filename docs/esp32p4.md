@@ -405,6 +405,48 @@ image runs correctly.
 
 The three-line chip revision warning is the bypassed `PANIC()` announcing itself and is also expected.
 
+### The Whole 32 MB, and Filesystem Throughput
+
+`configs/nuttx/esp32p4-function-ev-board/nsh-full-32m-rev1` uses the whole flash chip and tunes littlefs for
+throughput. It differs from `nsh-full-rev1` in six options:
+
+```
+CONFIG_ESPRESSIF_FLASH_32M=y
+CONFIG_ESPRESSIF_STORAGE_MTD_SIZE=0x1ef0000
+CONFIG_FS_LITTLEFS_BLOCK_SIZE_FACTOR=16
+CONFIG_FS_LITTLEFS_CACHE_SIZE_FACTOR=16
+CONFIG_TESTING_FSTEST=y
+CONFIG_TESTING_FSTEST_MAXFILE=65536
+```
+
+The stock configuration declares 4 MB of flash and a 960 KB storage partition, so most of the chip is
+unreachable. Declaring 32 MB and extending the partition to `0x1ef0000` gives a 30 MB filesystem, which
+`fstest` passes with no failures, and which littlefs confirms independently by reporting 7920 blocks of
+4096 bytes, exactly the configured size.
+
+Measured with `dd` over 4 MB:
+
+| Configuration | Write | Read |
+| --- | --- | --- |
+| 1 KB cache, 4 KB blocks | 132 KB/s | 2884 KB/s |
+| 4 KB cache, 4 KB blocks | 131 KB/s | 3976 KB/s |
+| 4 KB cache, 64 KB blocks | 222 KB/s | 6206 KB/s |
+
+Writes are limited by flash erase time rather than by software. At 4 KB blocks, 4 MB took 31.19 seconds for
+1024 blocks, which is 30 ms each and is ordinary sector erase latency, so the cache made no difference to
+writes at all. It did improve reads by 38 percent, and costs only RAM, since cache size is a runtime parameter
+rather than part of the on-disk format.
+
+Raising the block size to 64 KB is the change that moves writes, because one 64 KB block erase replaces sixteen
+4 KB sector erases. There is no point going further, since SPI NOR has no larger erase primitive short of
+erasing the chip.
+
+The cost is granularity. 64 KB blocks give 495 blocks rather than 7920, and a non-inlined file occupies at
+least one block, so a 1 KB file can consume 64 KB. That suits a 30 MB volume holding large files and suits
+`nsh-full-rev1` and its 960 KB volume much less, which is why the smaller configuration keeps 4 KB blocks.
+
+Changing the block size changes the on-disk format, so `/data` reformats on the first boot after the switch.
+
 ### Wireless Needs the C6, and the C6 Needs New Firmware
 
 The P4 has no radio, so Wi-Fi and Bluetooth mean driving the onboard ESP32-C6 over SDIO. Under NuttX there is no

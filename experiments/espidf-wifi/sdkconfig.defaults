@@ -10,7 +10,3 @@ CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 # CONFIG_ESP_HOST_WIFI_ENABLED path, which disables the esp_hosted component
 # and whose controller target is an ESP32 rather than the C6 on this board.
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
-
-# The factory slave firmware on the C6 is old (v0.0.6). A slower SDIO clock is
-# the cheapest thing to rule out before concluding the firmware is the problem.
-CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ=20000
