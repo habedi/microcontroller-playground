@@ -334,7 +334,79 @@ This configuration also enables the SPI flash with SmartFS, which is unformatted
 prints `Failed to mount the FS volume: -19` and suggests `mksmartfs /dev/smart0`. That is unrelated to PSRAM
 and is fixed by running that command once.
 
+### The Comprehensive Configuration
+
+`configs/nuttx/esp32p4-function-ev-board/nsh-full-rev1` combines the PSRAM heap with the shell tools and every
+on-chip peripheral that needs no wiring. It is 524316 bytes, which is 47 percent of the space between the
+application start at 0x002000 and the filesystem at 0x110000.
+
+Three filesystems mount themselves at boot:
+
+```
+nsh> df -h
+  Filesystem      Size      Used  Available Mounted on
+  littlefs        960K        8K       952K /data
+  procfs            0B        0B         0B /proc
+  tmpfs           512B      512B         0B /tmp
+```
+
+`/data` is persistent across reboots and reflashes. Memory is 32 MB of PSRAM as the user heap with internal RAM
+as the kernel heap, so `top` reports about 34 MB total.
+
+Device nodes: `adc0`, `efuse`, `espflash`, `gpio0` through `gpio3`, `i2c0`, `leds0`, `lirc0`, `lirc1`,
+`oneshot`, `pwm0`, `random`, `urandom`, `rtc0`, `spi2`, `timer0`, `watchdog0`, `watchdog1`, and
+`uorb/sensor_temp0`.
+
+Builtin apps: `adc`, `alarm`, `dd`, `dumpstack`, `getprime`, `gpio`, `heap`, `i2c`, `nxdiag`, `oneshot`,
+`ostest`, `pwm`, `rand`, `sensortest`, `spi`, `timer`, `vi`, `wdog`, and `ws2812`. The shell has tab
+completion, command history, pipelines, and `top`.
+
+Two things work with no wiring at all. The on-chip temperature sensor reads through uORB:
+
+```
+nsh> sensortest -n 3 temp0
+temp0: timestamp:71850000 value:32.00
+```
+
+And `top` reports per-task CPU load, which needs `CONFIG_SCHED_CPULOAD_SYSCLK`.
+
+### The RTC Does Not Survive a Reset
+
+`date` works within a session. Setting the clock and reading it back is correct:
+
+```
+nsh> date -s "Jan 01 00:00:00 2026"
+nsh> date
+Thu, Jan 01 00:00:09 2026
+```
+
+After a reboot it returns a nonsense year, and a different one each time. Three consecutive reboots from the
+same set time gave 502155, 420154, and 335426. The value is not a fixed multiple of what was set, so this looks
+like the driver reading an uninitialised or wrongly scaled counter after reset rather than a units mistake in
+one direction.
+
+`CONFIG_START_YEAR` and its companions do not help, because with `CONFIG_RTC_DRIVER=y` the time comes from the
+hardware counter rather than from those build-time values. Treat the clock as something to set after each boot,
+and do not rely on it across a reset.
+
+### Boot Messages That Are Not Faults
+
+The ROM prints a hash mismatch on every boot and continues:
+
+```
+SHA-256 comparison failed:
+Calculated: 3e61d9f3631351f0b62cfedd01e5b96623047f31f2f7ecd12abc1453fcf07910
+Expected: 00000000d0260000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+```
+
+The expected field is not populated by this NuttX build, so the check has nothing valid to compare against. The
+image runs correctly.
+
+The three-line chip revision warning is the bypassed `PANIC()` announcing itself and is also expected.
+
 ### Next Step
 
-Report the USB Serial/JTAG defects upstream, which is the one thing on this board still broken. The unbounded
-spin in `esp_usbserial_write()` is one, and the boot stopping while attaching interrupt source 22 is the other.
+Three defects are worth reporting upstream, all in the NuttX Espressif port rather than in the silicon: the
+unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt source 22 with the USB
+console, and the RTC returning nonsense after a reset.
