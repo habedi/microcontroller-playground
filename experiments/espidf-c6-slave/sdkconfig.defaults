@@ -1,0 +1,11 @@
+# The coprocessor role, not the host role. The component defaults to host.
+CONFIG_ESP_HOSTED_CP=y
+
+# SDIO is the only wire between the P4 and the C6 on this board. The component
+# already defaults to SDIO on a chip with an SDIO slave, which the C6 has, but
+# pinning it means a future default change cannot silently produce firmware that
+# speaks the wrong bus.
+CONFIG_EH_TRANSPORT_CP_SDIO=y
+
+# The C6's own console, reachable on the PROG_C6 header with a UART adapter.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y

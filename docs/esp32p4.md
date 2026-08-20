@@ -479,10 +479,27 @@ The C6 ships with slave firmware v0.0.6, which Espressif recommends upgrading. R
 to UART adapter on the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the
 P4 held in its bootloader. The over-the-air route needs a working link and so cannot bootstrap from here.
 
+### Reflashing the C6 Needs the Header
+
+Three host generations of ESP-Hosted fail identically at SDIO enumeration, 1.4.7, 2.7.4, and 3.0.6, so host
+software version is not the cause. See [../experiments/espidf-wifi](../experiments/espidf-wifi).
+
+A cable-free route looked possible, because Espressif's `esp-serial-flasher` supports SDIO with the C6 as a
+target and talks to the ROM loader rather than to slave firmware. It does not work here.
+[../experiments/espidf-c6flash](../experiments/espidf-c6flash) has the detail: forcing download mode needs the
+C6's bootstrap, and no ESP32-P4 GPIO on this board is documented as reaching it. The library's example uses
+GPIO53 for that purpose on another board, and on this board GPIO53 drives I2S audio, so the attempt proved
+nothing.
+
+That leaves the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the P4
+held in its bootloader. The over-the-air route through ESP-Hosted needs a working link and cannot bootstrap
+from a broken one.
+
 ### Next Step
 
 Flash the C6 with current slave firmware once a USB to UART adapter is available. That is the one blocker
-between this board and working Wi-Fi and Bluetooth.
+between this board and working Wi-Fi and Bluetooth. Read the C6's console first, since silence and a boot log
+point at different faults.
 
 Three defects are worth reporting upstream, all in the NuttX Espressif port rather than in the silicon: the
 unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt source 22 with the USB

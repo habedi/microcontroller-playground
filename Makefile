@@ -41,6 +41,13 @@ ESPIDF_SRC    ?= experiments/espidf-hello
 ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
 ESPIDF_PORT   ?= /dev/ttyACM0
 
+# The onboard ESP32-C6 is reached through the PROG_C6 header with a 3.3 V USB
+# to UART adapter, which appears as /dev/ttyUSB0 rather than /dev/ttyACM0. No
+# ESP32-P4 GPIO on this board reaches the C6's bootstrap, so it cannot be
+# flashed from the P4. See docs/esp32p4.md.
+C6_PORT       ?= /dev/ttyUSB0
+C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
+
 # idf.py writes the resolved sdkconfig next to the project by default. Sending
 # it to the build directory keeps generated files out of the repository, at the
 # cost of losing menuconfig edits on espidf-distclean. sdkconfig.defaults in
@@ -306,6 +313,22 @@ espidf-monitor: ## Open the ESP-IDF serial monitor on ESPIDF_PORT
 	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
 		. $(ESPIDF_DIR)/export.sh >/dev/null && \
 		idf.py $(ESPIDF_ARGS) -p $(ESPIDF_PORT) monitor'
+
+.PHONY: espidf-flash-c6
+espidf-flash-c6: ## Flash ESP-Hosted firmware to the C6 through a UART adapter on C6_PORT
+	@test -f "$(C6_BUILD)/espidf_c6_slave.bin" || { \
+		echo "Build it first:"; \
+		echo "  make espidf-build ESPIDF_SRC=experiments/espidf-c6-slave \\"; \
+		echo "       ESPIDF_TARGET=esp32c6"; \
+		exit 1; }
+	@echo "Wire the adapter to PROG_C6: EN, TXD, RXD, GND. Do not connect VDD."
+	@echo "Hold the P4 in its bootloader so it does not drive the bus."
+	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
+		. $(ESPIDF_DIR)/export.sh >/dev/null && \
+		python -m esptool --chip esp32c6 -p $(C6_PORT) write_flash \
+			0x0 $(C6_BUILD)/bootloader/bootloader.bin \
+			0x8000 $(C6_BUILD)/partition_table/partition-table.bin \
+			0x10000 $(C6_BUILD)/espidf_c6_slave.bin'
 
 .PHONY: espidf-distclean
 espidf-distclean: ## Remove the ESP-IDF build directory
