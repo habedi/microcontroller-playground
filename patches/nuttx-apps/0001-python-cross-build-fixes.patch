@@ -1,0 +1,41 @@
+diff --git a/interpreters/python/Makefile b/interpreters/python/Makefile
+index 8909586..fdc6c2b 100644
+--- a/interpreters/python/Makefile
++++ b/interpreters/python/Makefile
+@@ -96,7 +96,10 @@ $(HOSTPYTHON):
+ 	mkdir -p $(HOSTBUILD)
+ 	mkdir -p $(HOSTINSTALL)
+ 	$(Q) ( \
+-			cd $(HOSTBUILD) && $(CPYTHON_PATH)/configure \
++			cd $(HOSTBUILD) && \
++			env -u CC -u CXX -u LD -u AR -u RANLIB -u STRIP -u OBJCOPY \
++			    -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u ARFLAGS \
++			$(CPYTHON_PATH)/configure \
+ 			 --with-pydebug \
+ 			 --prefix=$(HOSTINSTALL) \
+ 			 --disable-test-modules \
+@@ -140,10 +143,11 @@ endif
+ 
+ $(SETUP_LOCAL):
+ 	$(Q) ( cp $(SETUP_LOCAL).in $(SETUP_LOCAL))
+-# _posixsubprocess is the fork-then-exec path, so vfork() is enough for it;
+-# os.fork() itself needs a real fork() and is governed by ac_cv_func_fork
+-# above.
+-ifeq ($(CONFIG_ARCH_HAVE_FORK)$(CONFIG_ARCH_HAVE_VFORK),)
++# _posixsubprocess needs a real fork(). Its vfork() path is gated on
++# defined(__linux__) in CPython's own source, so it is never selected on NuttX
++# and the module falls back to fork() regardless of CONFIG_ARCH_HAVE_VFORK.
++# os.fork() is governed by ac_cv_func_fork above.
++ifeq ($(CONFIG_ARCH_HAVE_FORK),)
+ 	@echo "_posixsubprocess" >> $@
+ endif
+ ifneq ($(CONFIG_LIBC_DLFCN),y)
+@@ -181,7 +185,7 @@ $(TARGETBUILD)/Makefile: $(HOSTPYTHON) $(CONFIG_SITE) $(SETUP_LOCAL)
+ 			ARCH_CHIP=$(CONFIG_ARCH_CHIP); \
+ 			ARCH="$${ARCH//-/}"; \
+ 			ARCH_CHIP="$${ARCH_CHIP//-/}"; \
+-			CFLAGS="$$(echo "$${CFLAGS}" | sed 's/-Os //')" \
++			CFLAGS="$$(echo "$${CFLAGS}" | sed 's/-Os //') -ftls-model=local-exec" \
+ 			CC="$(CC)" \
+ 			CXX="$(CXX)" \
+ 			AR="$(AR)" \

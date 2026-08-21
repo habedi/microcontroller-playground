@@ -21,10 +21,16 @@ The boards connect over USB to a Linux development machine, on either amd64 or a
 - ESP32-P4 development board with 32 MB of PSRAM and headers. The ESP32-P4 is a dual-core RISC-V application processor with no radio. The board
   pairs it with an onboard ESP32-C6, which acts as a wireless coprocessor and provides Wi-Fi 6 and Bluetooth LE. This sample is silicon revision
   v1.3, below the v3.0 that NuttX supports, so it needs `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and
-  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. It boots NuttX with those set, but its USB console does not reach a shell prompt, so
-  the board needs a USB to UART adapter on GPIO37 and GPIO38 before it is usable.
+  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. With those set it reaches a NuttShell prompt when the console is on UART0, and it also
+  runs ESP-IDF. Only the USB Serial/JTAG console is broken, so use the UART one. It has two USB-C connectors: one goes to the chip's
+  own USB Serial/JTAG controller, and the other goes to an onboard WCH CH343 bridge on UART0, meaning GPIO37 and GPIO38. Both enumerate as
+  `/dev/ttyACM0`, so identify them by USB vendor, `303a` for Espressif and `1a86` for the bridge. The bridge gives a UART0 console with no extra
+  hardware.
 - Raspberry Pi Pico 2 WH: an RP2350 board with headers and a wireless module. The RP2350 has both Arm Cortex-M33 and RISC-V Hazard3 cores. The
-  NuttX port targets the Cortex-M33 cores.
+  NuttX port targets the Cortex-M33 cores. The NuttX board is `raspberrypi-pico-2`, since the tree has no `-w` variant, and it runs correctly on the
+  WH with the wireless module unused. The `usbnsh` configuration gives a NuttShell over the USB cable, which makes this the board that currently
+  works without extra hardware. Wiring up the CYW43439 would mean borrowing from `boards/arm/rp23xx/pimoroni-pico-plus-2-w`, since the driver at
+  `arch/arm/src/rp23xx/rp23xx_cyw43439.c` is not wired up for this board. See `docs/raspberrypi-pico-2.md`.
 - 40-pin male-to-female Dupont jumper wires, 30 cm, for breadboard and peripheral wiring.
 
 ## Core Rules
@@ -47,10 +53,33 @@ External code lives in git submodules under `external/`. It is never copied into
 - `external/nuttx`: the Apache NuttX RTOS kernel and build system.
 - `external/nuttx-apps`: the NuttX applications tree. The build expects it next to the kernel.
 - `external/pico-sdk`: the Raspberry Pi Pico SDK. The NuttX rp23xx port builds against it through `PICO_SDK_PATH`.
+- `external/esp-idf`: the Espressif IoT Development Framework, pinned at v5.5.5. It is the vendor SDK for the ESP32 chips and builds on FreeRTOS. It
+  carries its own submodules, so it needs a recursive fetch, and its compilers are prebuilt downloads rather than Nix packages. `make espidf-install`
+  places them under `build/espressif` instead of the home directory.
 - `external/crosstool-ng`: the Espressif fork of crosstool-NG. It can build a bare-metal RISC-V toolchain for the Espressif chips. The dev shell
   builds its own compiler through the flake instead, so this submodule is a fallback rather than part of the normal setup.
 
-After cloning, run `git submodule update --init --depth 1` to fetch them.
+JetBrains IDEs need one manual setting. They detect every nested `.git` directory and register it as its own
+version control root. They then group the commit dialog by root. So a node named after a submodule appears there,
+holding that submodule's changed files. Committing with it checked creates a commit inside the submodule, which
+the Core Rules forbid. The IDE does not consult `ignore = dirty` when building that list.
+
+Remove the `external/...` rows under Settings, Version Control, Directory Mappings. Leave only the project root.
+Decline the offer to re-add them when the IDE reports unregistered roots.
+
+Each submodule carries `ignore = dirty` in `.gitmodules`. A configured and built tree is dirty by design. NuttX
+builds in place, and `make nuttx-patch` edits the submodule. The setting keeps that noise out of `git status`. It
+still shows a moved pointer, which is a real change and belongs in its own commit. To inspect the dirt
+deliberately, use `git status --ignore-submodules=none` or run git inside the submodule.
+
+After cloning, run `make submodules` to fetch them. A plain `git submodule update --init --depth 1` misses the nested submodules that the Pico SDK
+and ESP-IDF need.
+
+ESP-IDF pulls some code through its own component manager rather than as a submodule. Those land in
+`managed_components/` inside the project that asked for them, a path ESP-IDF does not let you move. That
+directory is gitignored, and `dependencies.lock` next to it is committed instead, since the lock file is the
+pin and the fetched source is a cache. This follows the same split as `flake.lock` and `uv.lock` against
+`.venv/`. A component belongs in `idf_component.yml`, alongside a comment saying why, not in `external/`.
 
 Python tools are managed by uv through `pyproject.toml`. That is where `esptool` and `pre-commit` come from. Run them as `uv run esptool` and
 `uv run pre-commit`, or from the uv-created virtual environment. Do not install Python tools with pip into the system interpreter.
@@ -81,6 +110,10 @@ All builds run inside the Nix dev shell. The `make nuttx-*` targets wrap the ste
    before switching boards.
 3. Adjust options with `make menuconfig`, then build with `make`.
 
+A change to the compiler flags needs the same treatment as a change to the configuration, for the same reason.
+Deleting the objects under `arch/risc-v/src/chip/esp-hal-3rdparty` forces just those to recompile. That matters
+when a full `make nuttx-distclean` would destroy something expensive in `nuttx-apps`, such as a built CPython.
+
 Any change to the configuration needs a clean rebuild. NuttX does not reliably recompile the vendored Espressif HAL objects when `.config` changes,
 so an incremental build can link objects compiled under the previous options. That has already produced a phantom linker error, whose workaround
 resolved a function to address zero and shipped it. After `kconfig-tweak`, `menuconfig`, or any other configuration edit, run `make nuttx-distclean`,
@@ -90,11 +123,13 @@ unnecessary.
 Flashing depends on the chip family:
 
 - Espressif boards flash over the USB serial port with esptool. Use the NuttX `make flash ESPTOOL_PORT=<port>` target, or run `uv run esptool`
-  directly. The port depends on the board. The ESP32-P4 development board wires its USB-C connector to the chip's own USB Serial/JTAG controller, so
-  it appears as `/dev/ttyACM0`. Boards that use a CP2102 bridge appear as `/dev/ttyUSB0` instead. The first flash of a chip also needs the bootloader,
+  directly. The port depends on the board. Either ESP32-P4 connector works for flashing, since the ROM download mode listens on UART0 as well as on
+  USB Serial/JTAG, and both appear as `/dev/ttyACM0`. Boards that use a CP2102 bridge appear as `/dev/ttyUSB0` instead. The first flash of a chip also needs the bootloader,
   which the NuttX build downloads or builds for you.
 - The Pico 2 flashes in BOOTSEL mode, either with `make flash-pico-uf2`, which copies `nuttx.uf2` to the drive the board exposes and needs no special
-  permissions, or with `make flash-pico`, which uses `picotool` and needs the udev rules that `make setup-udev` installs once.
+  permissions, or with `make flash-pico`, which uses `picotool` and needs the udev rules that `make setup-udev` installs once. Getting into BOOTSEL
+  mode always takes a physical button press, because NuttX exposes no picotool reset interface and `picotool reboot -f -u` therefore cannot do it.
+  Every test on that board costs the user a button press, so ask for one deliberately and change one thing at a time.
 
 Reach the serial console with `picocom` (for example `picocom -b 115200 /dev/ttyACM0`). Serial access needs membership in the `dialout` group on most
 Linux distributions (some use `uucp` instead).
@@ -133,17 +168,19 @@ The repository is meant to grow past its current boards and past NuttX. The conv
 
 ## Writing Style
 
-- Write plain, simple English, in docs and in code comments alike. Use short sentences and everyday words. Keep every fact, name, number, link, and
-  file path when you rewrite prose.
+- Write plain, simple English, in docs and in code comments alike. Use short sentences and everyday words.
 - Keep Markdown structure when you rewrite: headings, lists, tables, and links. Do not change fenced code blocks or YAML frontmatter; reproduce them
   exactly.
 - Use Oxford commas in inline lists: "a, b, and c" not "a, b, c".
 - Do not use em dashes, in documentation or in code comments. Restructure the sentence, or use a colon or semicolon instead.
 - Avoid colorful adjectives and adverbs. Write "rate limiter" not "smart rate limiter".
 - Prefer noun phrases for checklist items over imperative verbs. Write "rate limit enforcement" not "enforce rate limits".
-- Headings in Markdown files must be in title case: "Build from Source" not "Build from source". Minor words stay lowercase unless they are the first
-  word: the articles (a, an, the), the coordinating conjunctions (and, but, or, nor, so, yet, for), and the short prepositions (in, on, at, to, by,
-  of, up, as, from, with, into, over). The prepositions are named because "from" has to be lowercase for "Build from Source" to be correct.
+- Section headings in Markdown files, meaning `##` and `###`, must be in title case: "Build from Source" not "Build from source". Minor words stay
+  lowercase unless they are the first word: the articles (a, an, the), the coordinating conjunctions (and, but, or, nor, so, yet, for), and the short
+  prepositions (in, on, at, to, by, of, up, as, from, with, into, over). The prepositions are named because "from" has to be lowercase for "Build
+  from Source" to be correct.
+- Headings below that level, meaning `####` and deeper, use sentence case: "Clone the repository" not "Clone the Repository". Proper nouns keep their
+  capitals, so "Build and run on the ESP32-P4" is correct.
 - Do not bold the lead-in of a list item. Write "Unit tests: ..." not "**Unit tests**: ...".
 - Use sentence case for the lead-in of a list item. Write "Seed selection: ..." not "Seed Selection: ...". Proper nouns keep their capitals.
 - Capitalize only the first part of a hyphenated compound: "Real-time Scheduling" in a heading, "Real-time" at the start of a sentence, and
@@ -182,6 +219,27 @@ The boards are the test bench for everything else. Before committing a change:
 1. The affected configuration builds from a clean tree inside the dev shell, after a `make nuttx-distclean`, not from an incremental one.
 2. The image was flashed and seen running on the real board, and the notes say so.
 3. Nothing under `external/` was modified, and no build output is staged. Check the nested HAL repository as well as the submodules themselves.
+
+## Privacy
+
+This repository is public, so anything committed is published.
+The rules below are about everything that describes the person or the machine instead.
+
+- No absolute paths. Use `PLAYGROUND_ROOT` for a path inside this repository; the dev shell exports it. Never
+  write a home directory or a Nix store path into a saved configuration, a Makefile, or a document. Check saved
+  defconfigs for this, because `savedefconfig` records whatever was in `.config`.
+- No hardware identifiers. Chip MAC addresses, eFuse contents, and USB serial numbers of adapters all identify a
+  specific device. Read them at the console when needed and leave them there.
+- No wireless survey data. Access point names from a scan identify a location, so record that `wapi scan` works
+  and what it reports, not its output. Network names and pre-shared keys never belong in a file.
+- No purchasing or personal notes. Shopping lists, prices, and plans go in a file matching `*.local.md`, which
+  `.gitignore` covers with a generic pattern so the rule does not name what it hides.
+- Selected console output only. Quote the lines that carry the technical point rather than pasting a whole
+  capture, since a full boot log or shell session tends to carry identifiers nobody intended to publish.
+
+Before committing, a scan of the tracked files outside `external/` for home directories, MAC addresses, and
+network names costs a few seconds and is worth doing whenever a change touches documentation or saved
+configurations.
 
 ## Commit Hygiene
 

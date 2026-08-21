@@ -1,0 +1,12 @@
+# See experiments/espidf-hello for why these two are needed.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# The console goes to UART0, reached by the onboard CH343 bridge.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+
+# Route the proxied Wi-Fi API through ESP-Hosted rather than the in-tree
+# CONFIG_ESP_HOST_WIFI_ENABLED path, which disables the esp_hosted component
+# and whose controller target is an ESP32 rather than the C6 on this board.
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y

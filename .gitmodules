@@ -2,15 +2,23 @@
 	path = external/nuttx
 	url = https://github.com/apache/nuttx
 	shallow = true
+	ignore = dirty
 [submodule "external/nuttx-apps"]
 	path = external/nuttx-apps
 	url = https://github.com/apache/nuttx-apps
 	shallow = true
+	ignore = dirty
 [submodule "external/pico-sdk"]
 	path = external/pico-sdk
 	url = https://github.com/raspberrypi/pico-sdk
 	shallow = true
+	ignore = dirty
 [submodule "external/crosstool-ng"]
 	path = external/crosstool-ng
 	url = https://github.com/espressif/crosstool-NG
 	shallow = true
+	ignore = dirty
+[submodule "external/esp-idf"]
+	path = external/esp-idf
+	url = https://github.com/espressif/esp-idf
+	ignore = dirty

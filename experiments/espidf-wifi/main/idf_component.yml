@@ -1,0 +1,14 @@
+dependencies:
+  # The ESP32-P4 has no radio. esp_wifi_remote supplies the esp_wifi API and
+  # esp_hosted carries it over SDIO to the onboard ESP32-C6.
+  #
+  # These two must be paired. esp_hosted's own Kconfig turns itself off when
+  # CONFIG_ESP_HOST_WIFI_ENABLED is set, and on when esp_wifi_remote selects
+  # the hosted library, so the two mechanisms are mutually exclusive.
+  #
+  # Pinned to match experiments/espidf-c6-slave, which builds the coprocessor
+  # half from the same version. Waveshare pins 1.4.* for ESP-IDF 5.x in its own
+  # working P4 example, and 1.4.7, 2.7.4, and 3.0.6 all fail identically here,
+  # so once we control both halves the newest matched pair is the right choice.
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "^3.0.6"

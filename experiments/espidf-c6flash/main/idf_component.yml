@@ -1,0 +1,4 @@
+dependencies:
+  # One ESP chip flashing another. SDIO is the only wire between the P4 and the onboard C6 on this board,
+  # and this library lists SDIO as an experimental transport with the C6 as a supported target.
+  espressif/esp-serial-flasher: "*"

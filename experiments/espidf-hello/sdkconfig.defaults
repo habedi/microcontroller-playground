@@ -1,0 +1,20 @@
+# This sample is pre-production silicon, revision v1.3, and ESP-IDF defaults
+# to a minimum of v3.1. The bootloader checks the revision and refuses to boot
+# an image built for a newer one. ESP-IDF states that revisions below v3.0 and
+# revisions from v3.0 up have large hardware differences and that support for
+# the two is mutually exclusive, so both options are needed together. NuttX
+# spells these the same way, having taken the names from here.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# The board carries a WCH CH343 USB to UART bridge on UART0, reached through
+# its UART connector, which enumerates as 1a86:55d3. The default UART console
+# therefore works over that cable with no extra hardware. The chip's own USB
+# Serial/JTAG controller stays on as the secondary console, which is the
+# ESP-IDF default, so the same output reaches the other connector as well.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+
+# PSRAM is left off because this program does not need it, not because it is
+# broken. It works at up to 200 MHz; see experiments/espidf-psram.
+CONFIG_SPIRAM=n
