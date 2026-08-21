@@ -10,8 +10,8 @@ over the board's onboard CH343 bridge, and ESP-IDF v5.5.5 runs and prints over t
 configuration is `configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
 
 Only the USB Serial/JTAG console is broken. The `usbconsole` configuration still stops while attaching the
-console interrupt, and the same image with the console moved to UART0 boots to a prompt, which locates the
-fault in that driver rather than in the port as a whole or in the silicon.
+console interrupt. The same image with the console on UART0 boots to a prompt. So the fault is in that driver,
+not in the port as a whole and not in the silicon.
 
 The 32 MB of PSRAM also works, at up to 200 MHz under ESP-IDF.
 
@@ -236,11 +236,12 @@ CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
 ```
 
-ESP-IDF defaults to `CONFIG_ESP32P4_REV_MIN_301`, and its bootloader rejects an image whose minimum revision
-is above the chip's. The two options together move the accepted window to v1.0 through v1.99, which contains
-v1.3. The Kconfig help states that revisions below v3.0 and revisions from v3.0 up have large hardware
-differences and that support for the two is mutually exclusive, so the option is a fork in the hardware
-abstraction layer rather than a relaxed check.
+ESP-IDF defaults to `CONFIG_ESP32P4_REV_MIN_301`. Its bootloader rejects an image whose minimum revision is
+above the chip's. The two options together move the accepted window to v1.0 through v1.99, which contains v1.3.
+
+The Kconfig help says revisions below v3.0 and revisions from v3.0 up have large hardware differences, and that
+support for the two is mutually exclusive. So the option forks the hardware abstraction layer. It does not just
+relax a check.
 
 The console needs `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, since ESP-IDF puts the console on UART0 by default
 and nothing is attached to GPIO37 and GPIO38 yet.
@@ -495,12 +496,172 @@ That leaves the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GN
 held in its bootloader. The over-the-air route through ESP-Hosted needs a working link and cannot bootstrap
 from a broken one.
 
+### CPython Builds but Does Not Run
+
+The board has a stock `python` configuration, and it produces real CPython 3.13.0 with pip rather than
+MicroPython. It builds and the image boots. The interpreter does not run.
+
+The configuration depends on the PSRAM: it sets `ESPRESSIF_SPIRAM`, moves BSS to external memory with
+`SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`, and places a 2 MB filesystem heap there. It declares 16 MB of flash with
+the application occupying 0x002000 to 0xFCA000, about 15.8 MB, because the standard library is linked into the
+image as a 5.92 MiB `python313.zip` rather than placed on the filesystem. `PYTHONPATH` is `/data`, which is only
+216 KB here and is meant for your own scripts.
+
+The image is 15058088 bytes, takes about three and a half minutes to flash, and boots reporting three heaps:
+
+```
+nsh> free
+      total       used       free    maxused    maxfree  nused  nfree name
+    2097148       2020    2095128       2400    2095128     25      1 heapfs
+     316068      11332     304736      41600     190432     56      6 Kmem
+   31296252       5500   31290752       7416   31289216      8      2 Umem
+```
+
+`python` appears among the builtin apps. Running it hangs the board. `python &` shows the task created as
+`python [7:100]` and the shell returns its prompt, so the 512 KB stack allocates successfully, which means it
+comes from the 31 MB user heap in PSRAM rather than the 316 KB kernel heap. From the moment the task runs the
+system produces nothing: ten liveness probes over ten minutes returned zero bytes and the console does not
+even echo. A reset always recovers the board.
+
+Ruled out along the way: stack allocation, which succeeds; argument handling, since bare `python` behaves
+identically; and scheduler starvation, since `CONFIG_RR_INTERVAL` is 200, so time slicing is active and an
+equal-priority task cannot lock out the shell.
+
+### The Cause Is the Thread Pointer
+
+Debug assertions turn the silence into an answer:
+
+```
+check_and_mount_romfs: Mounting ROMFS filesystem at target=/usr/local/lib with source=/dev/ram1
+riscv_exception: EXCEPTION: Load access fault. MCAUSE: 00000005, EPC: 4005c318, MTVAL: 00000000
+riscv_fault_handler: PANIC!!! Exception = 00000005
+task: python
+```
+
+`MTVAL` is the faulting address, so this is a load from zero, and the EPC resolves to `_PyThreadState_Attach`.
+The register dump shows why: `TP: 00000000`. The RISC-V thread pointer is never set, so every thread-local read
+lands near address zero.
+
+CPython keeps its per-thread interpreter state in `__thread` variables, and NuttX sets the thread pointer only
+when `CONFIG_SCHED_THREAD_LOCAL` is enabled, at `riscv_initialstate.c:122`:
+
+```c
+__asm__ __volatile__("mv tp, %0" : : "r"(tcb));
+```
+
+That option is absent from the stock `python` configuration. It requires `ARCH_HAVE_THREAD_LOCAL`, which RISC-V
+does select, and a toolchain that supports `__thread`, which the dev shell's compiler does.
+
+So the TLS model and the kernel option are a matched pair, and either alone is broken. Initial-exec TLS cannot
+link, because it resolves through a GOT that `esp32p4_sections.ld` has nowhere to place. Local-exec TLS links but
+cannot run without `CONFIG_SCHED_THREAD_LOCAL`, because it computes addresses from a thread pointer that stays
+zero. A configuration enabling CPython on RISC-V needs both.
+
+### The Blocker Is the Board's Linker Script
+
+Enabling `CONFIG_SCHED_THREAD_LOCAL` does not link:
+
+```
+riscv_tls.c: undefined reference to `_stdata'
+riscv_tls.c: undefined reference to `_etdata'
+riscv_tls.c: undefined reference to `_etbss'
+```
+
+`up_tls_size()` and `up_tls_initialize()` need symbols marking the bounds of the thread-local data and BSS
+sections, and none of the ESP32-P4 linker scripts define `_stdata`, `_etdata`, `_stbss`, or `_etbss`. So the
+board support has no thread-local storage support at all.
+
+This is not an exotic requirement. 42 board scripts elsewhere in the tree define these symbols, so the pattern is
+established and the fix is to place `.tdata` and `.tbss` output sections in `esp32p4_sections.ld` with the
+matching symbols. That is a change to board support rather than to a configuration, and it is the one remaining
+thing standing between this board and a working CPython.
+
+The full chain, for anyone picking this up: CPython needs `__thread`; `__thread` needs the thread pointer, which
+needs `CONFIG_SCHED_THREAD_LOCAL`; that option needs `riscv_tls.c` to link, which needs TLS section symbols the
+ESP32-P4 linker script does not provide.
+
+### Getting Diagnostics Cost Three Attempts
+
+Worth recording, because the obstacles were unrelated to Python.
+
+An incremental rebuild after enabling `CONFIG_DEBUG_*` produced an image that would not boot at all. That is the
+stale Espressif HAL object trap this file already describes, and deleting the 245 objects under
+`arch/risc-v/src/chip/esp-hal-3rdparty` forces the recompile without a `distclean`, which matters because
+`distclean` reaches into `nuttx-apps` and would destroy the multi-hour CPython build.
+
+With assertions active, the board then died during bring-up rather than reaching a prompt. The Ethernet MAC times
+out because nothing is connected, and its error path trips an assertion:
+
+```
+E (1743) esp.emac: emac_esp32_init(535): reset timeout
+dump_assert_info: Assertion failed ... semcount < 0: at file: semaphore/sem_recover.c:121 task: AppBringUp
+```
+
+Without assertions this is the benign-looking `board_emac_init failed: -5` on every boot of this configuration.
+It is a real defect in a failure path, worth reporting, and it hides until assertions are on. Setting
+`CONFIG_ESPRESSIF_EMAC=n` avoids it. Disabling `CONFIG_NET_ETHERNET` as well does not build, because
+`icmp_ioctl.c` needs a link layer present.
+
+### Two Warnings From the Same Boot
+
+The Espressif flash driver reports that this chip model has no support for access beyond 16 MB:
+
+```
+W: Detected flash size > 16 MB, but access beyond 16 MB is not supported for this flash model yet
+```
+
+That bears on `nsh-full-32m-rev1`, which declares 32 MB and puts a 30 MB littlefs on it. That configuration
+passes `fstest` and survived a 16 MB write, so it works in practice, but the driver does not claim to support it.
+
+The driver also reports using a generic flash driver for a GigaDevice chip and suggests
+`SPI_FLASH_SUPPORT_GD_CHIP`, which is untested here.
+
+### Three Fixes the CPython Port Needs
+
+Getting it to link took three changes, kept in `patches/nuttx-apps/0001-python-cross-build-fixes.patch`. Each is
+reproducible on any NuttX RISC-V target without fork rather than specific to this board.
+
+The host interpreter was built with the cross compiler. The port builds CPython twice, once for the host as a
+cross-compilation helper, and its host rule runs `configure` without overriding `CC`, so it inherits the target
+compiler and fails with "cannot run C compiled programs". The fix clears the toolchain variables for that one
+invocation.
+
+`_posixsubprocess` cannot compile without fork. The port disables it only when both fork and vfork are absent,
+reasoning that vfork suffices. CPython gates its vfork path on `defined(__linux__)`, so on NuttX it is never
+selected and the module falls back to `fork()`. `ARCH_HAVE_FORK` depends on `ARCH_ADDRENV`, which needs
+MMU-backed address environments this chip lacks, so the module can never build here. The fix keys the decision on
+real fork alone, at the cost of Python's `subprocess` module.
+
+Thread-local storage used the initial-exec model, which resolves through a GOT, so the linker synthesised a
+`.got.plt` section that `esp32p4_sections.ld` cannot place and the link failed with "discarded output section:
+`.got.plt`". libpython carried 567 `R_RISCV_TLS_GOT_HI20` relocations where no NuttX library carried any. Adding
+`-ftls-model=local-exec` takes that to zero and is the correct model for a single-address-space image.
+
+### Building CPython Needs More From the Dev Shell
+
+Four additions to `flake.nix`, all for the host half of the build rather than the target. autoconf, automake, and
+libtool, since libffi runs `autoreconf`. `ACLOCAL_PATH` pointing at libtool's macros, without which aclocal
+reports "Libtool library used but LIBTOOL is undefined". A `hostPythonDeps` list of zlib, openssl, bzip2, xz,
+sqlite, and libffi, without which the host interpreter has no zlib module and the bundled pip cannot unpack its
+own wheel. And `hardeningDisable = [ "all" ]`, because Nix adds `-Werror=format-security`, which collides with
+the port's `-Wno-format`, along with `relro` and `bindnow`, which make the linker discard `.got.plt`.
+
 ### Next Step
 
 Flash the C6 with current slave firmware once a USB to UART adapter is available. That is the one blocker
 between this board and working Wi-Fi and Bluetooth. Read the C6's console first, since silence and a boot log
 point at different faults.
 
-Three defects are worth reporting upstream, all in the NuttX Espressif port rather than in the silicon: the
-unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt source 22 with the USB
-console, and the RTC returning nonsense after a reset.
+Several defects are worth reporting upstream. None is in the silicon.
+
+In the Espressif port: the unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt
+source 22 with the USB console, the RTC returning nonsense after a reset, and the semaphore assertion in the EMAC
+error path when `emac_esp32_init` times out.
+
+In the CPython port under `nuttx-apps`, three more. Each one is reproducible on any NuttX RISC-V target, not
+just this board. The host interpreter is built with the cross compiler. `_posixsubprocess` needs a real fork,
+because CPython's vfork path is Linux-only. And thread-local storage needs two changes at once: the target needs
+`-ftls-model=local-exec` to link, and the configuration needs `CONFIG_SCHED_THREAD_LOCAL` to run.
+
+The ESP32-P4 linker scripts are missing the thread-local storage section symbols that
+`CONFIG_SCHED_THREAD_LOCAL` requires, which blocks that option on this board entirely.

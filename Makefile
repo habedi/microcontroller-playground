@@ -23,6 +23,12 @@ SAVED_CONFIG   ?=
 SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
 NUTTX_APPS_DIR ?= ../nuttx-apps
 
+# Each entry is <submodule directory>:<patch directory>. A patch that must
+# survive lives here rather than as a commit inside the submodule.
+# NUTTX_APPS_DIR is relative to the kernel tree, because CONFIG_APPS_DIR needs
+# it that way. The patch sets use a repository-relative path instead.
+PATCH_SETS = $(NUTTX_DIR):patches/nuttx external/nuttx-apps:patches/nuttx-apps
+
 # The Pico SDK, a second SDK alongside NuttX. A project is any directory with a
 # CMakeLists.txt, so PICOSDK_SRC points at one under experiments/.
 PICOSDK_DIR    ?= external/pico-sdk
@@ -150,23 +156,49 @@ test-hooks: ## Run the Git hooks on all files
 
 # NuttX. A second OS gets its own prefixed group (zephyr-build, and so on).
 .PHONY: nuttx-patch
-nuttx-patch: ## Apply the patches under patches/nuttx to the NuttX submodule
-	@for p in patches/nuttx/*.patch; do \
-		if git -C $(NUTTX_DIR) apply --check "$(CURDIR)/$$p" 2>/dev/null; then \
-			git -C $(NUTTX_DIR) apply "$(CURDIR)/$$p" && echo "applied $$p"; \
-		elif git -C $(NUTTX_DIR) apply --reverse --check "$(CURDIR)/$$p" 2>/dev/null; then \
-			echo "already applied $$p"; \
-		else \
-			echo "ERROR: $$p does not apply cleanly"; exit 1; \
-		fi; \
+nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
+	@for set in $(PATCH_SETS); do \
+		dir=$${set%%:*}; pdir=$${set#*:}; \
+		test -d "$$pdir" || continue; \
+		for p in $$pdir/*.patch; do \
+			test -f "$$p" || continue; \
+			if git -C $$dir apply --check "$(CURDIR)/$$p" 2>/dev/null; then \
+				git -C $$dir apply "$(CURDIR)/$$p" && echo "applied $$p"; \
+			elif git -C $$dir apply --reverse --check "$(CURDIR)/$$p" \
+			     2>/dev/null; then \
+				echo "already applied $$p"; \
+			else \
+				echo "ERROR: $$p does not apply cleanly to $$dir"; \
+				echo "Run make nuttx-repatch to reset the patch state."; \
+				exit 1; \
+			fi; \
+		done; \
 	done
 
 .PHONY: nuttx-unpatch
-nuttx-unpatch: ## Remove the patches under patches/nuttx from the NuttX submodule
-	@for p in patches/nuttx/*.patch; do \
-		git -C $(NUTTX_DIR) apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
-			echo "reverted $$p" || echo "not applied $$p"; \
+nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
+	@for set in $(PATCH_SETS); do \
+		dir=$${set%%:*}; pdir=$${set#*:}; \
+		test -d "$$pdir" || continue; \
+		for p in $$pdir/*.patch; do \
+			test -f "$$p" || continue; \
+			git -C $$dir apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
+				echo "reverted $$p" || echo "not applied $$p"; \
+			for f in $$(sed -n 's|^+++ b/||p' "$$p"); do \
+				git -C $$dir ls-files --error-unmatch "$$f" \
+					>/dev/null 2>&1 \
+					|| { test -f $$dir/$$f && rm -f $$dir/$$f && \
+						echo "  removed untracked $$f"; }; \
+			done; \
+		done; \
 	done
+
+# A branch switch or a hard reset reverts only the tracked edits. A file the
+# patch added stays behind. The patch then applies in neither direction: forward
+# fails because the file exists, reverse fails because the edits are gone. This
+# target clears that state.
+.PHONY: nuttx-repatch
+nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent state
 
 .PHONY: cyw43-firmware
 cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs

@@ -27,8 +27,23 @@
             uv
           ];
 
+          # The NuttX CPython port builds a host interpreter first, as a
+          # cross-compilation helper. These are its libraries. Without zlib the
+          # helper has no zlib module, and the bundled pip cannot unpack its own
+          # wheel. The rest are what a CPython build expects to find.
+          hostPythonDeps = with pkgs; [
+            zlib
+            openssl
+            bzip2
+            xz
+            sqlite
+            libffi
+          ];
+
           # The NuttX build system. A second OS (Zephyr, FreeRTOS, and so on)
-          # gets its own list like this one.
+          # gets its own list like this one. The autotools are here for the
+          # interpreters under nuttx-apps. CPython pulls in libffi, and libffi
+          # runs autoreconf before configure.
           nuttxTools = with pkgs; [
             kconfig-frontends
             gperf
@@ -36,6 +51,9 @@
             bison
             genromfs
             ncurses
+            autoconf
+            automake
+            libtool
           ];
 
           # The Raspberry Pi Pico 2 (RP2350, Arm Cortex-M33).
@@ -90,7 +108,16 @@
         in
         {
           default = pkgs.mkShell {
-            packages = commonTools ++ nuttxTools ++ pico2Tools ++ esp32Tools ++ rustZigTools;
+            # Nix's compiler wrapper adds hardening flags. They suit a hosted
+            # Linux program, not a bare-metal image. Format hardening adds
+            # -Werror=format-security. That collides with the -Wno-format the
+            # CPython target build passes. relro and bindnow make the linker
+            # discard .got.plt, which fails the final link against a custom
+            # linker script. None of them help here, so all are off.
+            hardeningDisable = [ "all" ];
+
+            packages = commonTools ++ hostPythonDeps ++ nuttxTools ++ pico2Tools
+                       ++ esp32Tools ++ rustZigTools;
 
             # The NuttX rp23xx port builds against the Pico SDK submodule.
             # PLAYGROUND_ROOT lets a NuttX configuration name a path in this
@@ -99,6 +126,11 @@
             shellHook = ''
               export PICO_SDK_PATH="$PWD/external/pico-sdk"
               export PLAYGROUND_ROOT="$PWD"
+
+              # libffi runs autoreconf, and aclocal needs this to find
+              # libtool's macros. Without it the build fails with
+              # "Libtool library used but LIBTOOL is undefined".
+              export ACLOCAL_PATH="${pkgs.libtool}/share/aclocal''${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
             '';
           };
         }

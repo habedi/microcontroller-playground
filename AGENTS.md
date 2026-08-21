@@ -60,16 +60,17 @@ External code lives in git submodules under `external/`. It is never copied into
   builds its own compiler through the flake instead, so this submodule is a fallback rather than part of the normal setup.
 
 JetBrains IDEs need one manual setting. They detect every nested `.git` directory and register it as its own
-version control root, then group the commit dialog by root, so a node named after a submodule appears there
+version control root. They then group the commit dialog by root. So a node named after a submodule appears there,
 holding that submodule's changed files. Committing with it checked creates a commit inside the submodule, which
-the Core Rules forbid. The IDE does not consult `ignore = dirty` when building that list. Remove the
-`external/...` rows under Settings, Version Control, Directory Mappings, leaving only the project root, and
-decline the offer to re-add them when the IDE reports unregistered roots.
+the Core Rules forbid. The IDE does not consult `ignore = dirty` when building that list.
 
-Each submodule carries `ignore = dirty` in `.gitmodules`. A configured and built tree is dirty by design, since
-NuttX builds in place and `make nuttx-patch` edits the submodule, so that setting keeps the noise out of
-`git status` while still showing a moved pointer, which is a real change and belongs in its own commit. To
-inspect the dirt deliberately, use `git status --ignore-submodules=none` or run git inside the submodule.
+Remove the `external/...` rows under Settings, Version Control, Directory Mappings. Leave only the project root.
+Decline the offer to re-add them when the IDE reports unregistered roots.
+
+Each submodule carries `ignore = dirty` in `.gitmodules`. A configured and built tree is dirty by design. NuttX
+builds in place, and `make nuttx-patch` edits the submodule. The setting keeps that noise out of `git status`. It
+still shows a moved pointer, which is a real change and belongs in its own commit. To inspect the dirt
+deliberately, use `git status --ignore-submodules=none` or run git inside the submodule.
 
 After cloning, run `make submodules` to fetch them. A plain `git submodule update --init --depth 1` misses the nested submodules that the Pico SDK
 and ESP-IDF need.
@@ -108,6 +109,10 @@ All builds run inside the Nix dev shell. The `make nuttx-*` targets wrap the ste
    the `make nuttx-*` targets. The Pico 2 is `raspberrypi-pico-2:nsh`, and the ESP32-C6 on its own is `esp32c6-devkitc:nsh`. Run `make distclean`
    before switching boards.
 3. Adjust options with `make menuconfig`, then build with `make`.
+
+A change to the compiler flags needs the same treatment as a change to the configuration, for the same reason.
+Deleting the objects under `arch/risc-v/src/chip/esp-hal-3rdparty` forces just those to recompile. That matters
+when a full `make nuttx-distclean` would destroy something expensive in `nuttx-apps`, such as a built CPython.
 
 Any change to the configuration needs a clean rebuild. NuttX does not reliably recompile the vendored Espressif HAL objects when `.config` changes,
 so an incremental build can link objects compiled under the previous options. That has already produced a phantom linker error, whose workaround
@@ -163,8 +168,7 @@ The repository is meant to grow past its current boards and past NuttX. The conv
 
 ## Writing Style
 
-- Write plain, simple English, in docs and in code comments alike. Use short sentences and everyday words. Keep every fact, name, number, link, and
-  file path when you rewrite prose.
+- Write plain, simple English, in docs and in code comments alike. Use short sentences and everyday words.
 - Keep Markdown structure when you rewrite: headings, lists, tables, and links. Do not change fenced code blocks or YAML frontmatter; reproduce them
   exactly.
 - Use Oxford commas in inline lists: "a, b, and c" not "a, b, c".
@@ -221,9 +225,9 @@ The boards are the test bench for everything else. Before committing a change:
 This repository is public, so anything committed is published.
 The rules below are about everything that describes the person or the machine instead.
 
-- No absolute paths. Use `PLAYGROUND_ROOT` for a path inside this repository, which the dev shell exports, and
-  never write a home directory or a Nix store path into a saved configuration, a Makefile, or a document. Saved
-  defconfigs get checked for this, since `savedefconfig` will happily record whatever was in `.config`.
+- No absolute paths. Use `PLAYGROUND_ROOT` for a path inside this repository; the dev shell exports it. Never
+  write a home directory or a Nix store path into a saved configuration, a Makefile, or a document. Check saved
+  defconfigs for this, because `savedefconfig` records whatever was in `.config`.
 - No hardware identifiers. Chip MAC addresses, eFuse contents, and USB serial numbers of adapters all identify a
   specific device. Read them at the console when needed and leave them there.
 - No wireless survey data. Access point names from a scan identify a location, so record that `wapi scan` works
