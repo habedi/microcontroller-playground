@@ -212,6 +212,71 @@ the radio never works:
   defined only by the patch. The driver still compiles, but nothing registers `wlan0`. The build checks for
   the board symbol whenever the driver symbol is set, and says which command to run.
 
+
+### The 1.3 Inch 240x240 Display
+
+A Waveshare Pico-LCD-1.3, an ST7789 panel with a joystick and four buttons, works over SPI1.
+It seats onto all 40 pins, so nothing needs wiring.
+
+```shell
+make nuttx-distclean
+make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13
+make nuttx-build
+make flash-pico-uf2 UF2=external/nuttx/nuttx.uf2
+```
+
+The image is 348672 bytes. It registers `/dev/fb0` and `/dev/lcd0`, and the `fb` example draws nested coloured
+rectangles on the panel:
+
+```
+nsh> fb
+     xres: 240
+     yres: 240
+      bpp: 16
+    fblen: 115200
+   stride: 480
+Test finished
+```
+
+115200 bytes is 240 by 240 at two bytes per pixel, so the geometry is right.
+
+### Two Things the Tree Was Missing
+
+NuttX has the chip-independent `st7789.c` driver, but the rp23xx board support could not reach it. Both gaps are
+fixed by `patches/nuttx/0002-rp23xx-st7789-lcd.patch`.
+
+`common/src/rp23xx_st7789.c` did not exist, although both `Make.defs` and `CMakeLists.txt` already listed it
+under `CONFIG_LCD_ST7789`. The new file follows `rp23xx_st7735.c`, which is the same pattern already native to
+this chip. Only the backlight pin differs: GP13 here against GP25 on the panel that file was written for.
+
+`common/src/rp23xx_common_bringup.c` registered no display at all. It had no `fb_register()`, no
+`board_lcd_initialize()`, and no `lcddev_register()`, so nothing would ever have called the glue. The patch adds
+those three, guarded by `CONFIG_VIDEO_FB`, `CONFIG_LCD`, and `CONFIG_LCD_DEV`, mirroring
+`rp2040_common_bringup.c`. This is also why `rp23xx_st7735.c` sits in the tree with no board configuration using
+it.
+
+### Pins
+
+The Waveshare wiring matches the rp23xx SPI1 defaults, so no pin options need setting:
+
+| Signal | GPIO | Source |
+| --- | --- | --- |
+| CLK | 10 | `CONFIG_RP23XX_SPI1_SCK_GPIO` |
+| DIN | 11 | `CONFIG_RP23XX_SPI1_TX_GPIO` |
+| CS | 9 | `CONFIG_RP23XX_SPI1_CS_GPIO` |
+| DC | 8 | `CONFIG_RP23XX_SPI1_RX_GPIO` |
+| RST | 12 | `LCD_RST` in the board glue |
+| BL | 13 | `LCD_BL` in the board glue |
+
+D/C reuses the SPI1 RX pad. The panel bus is write-only, so RX is free, and `rp23xx_spi1cmddata()` in
+`common/src/rp23xx_spi.c` already drives `CONFIG_RP23XX_SPI1_RX_GPIO` for exactly this. That option has to stay
+at its default of 8.
+
+### Not Done Yet
+
+The joystick and four buttons. They are plain GPIO and need their own setup. The panel is 240 pixels wide while
+NES output is 256 and SNES is 256, so an emulator would have to crop or scale horizontally.
+
 ### Cold Boot Is Intermittent
 
 A cold boot sometimes leaves the board unreachable. The USB device enumerates and the host can write to it,

@@ -47,10 +47,11 @@ ESPIDF_SRC    ?= experiments/espidf-hello
 ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
 ESPIDF_PORT   ?= /dev/ttyACM0
 
-# The onboard ESP32-C6 is reached through the PROG_C6 header with a 3.3 V USB
-# to UART adapter, which appears as /dev/ttyUSB0 rather than /dev/ttyACM0. No
-# ESP32-P4 GPIO on this board reaches the C6's bootstrap, so it cannot be
-# flashed from the P4. See docs/esp32p4.md.
+# The onboard ESP32-C6 is reached with a 3.3 V USB to UART adapter, which
+# appears as /dev/ttyUSB0 rather than /dev/ttyACM0. This board exposes the C6
+# only as solder pads, so the joints have to be soldered. No ESP32-P4 GPIO
+# reaches the C6's bootstrap either, so it cannot be flashed from the P4. See
+# docs/esp32p4.md.
 C6_PORT       ?= /dev/ttyUSB0
 C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
 
@@ -353,7 +354,8 @@ espidf-flash-c6: ## Flash ESP-Hosted firmware to the C6 through a UART adapter o
 		echo "  make espidf-build ESPIDF_SRC=experiments/espidf-c6-slave \\"; \
 		echo "       ESPIDF_TARGET=esp32c6"; \
 		exit 1; }
-	@echo "Wire the adapter to PROG_C6: EN, TXD, RXD, GND. Do not connect VDD."
+	@echo "Wire the adapter to the ESP32-C6 UART pads: EN, TXD, RXD, GND."
+	@echo "Do not connect VDD. They are pads, so the joints need soldering."
 	@echo "Hold the P4 in its bootloader so it does not drive the bus."
 	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
 		. $(ESPIDF_DIR)/export.sh >/dev/null && \
