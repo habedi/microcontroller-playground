@@ -254,6 +254,12 @@ nuttx-check-toolchain:
 		exit 1; }; \
 	fw=$$(sed -n 's/^CONFIG_CYW43439_FIRMWARE_BIN_PATH="\(.*\)"$$/\1/p' \
 	  $(NUTTX_DIR)/.config); \
+	case "$$fw" in *PLAYGROUND_ROOT*) \
+		test -n "$$PLAYGROUND_ROOT" || { \
+			echo "PLAYGROUND_ROOT is unset, and the firmware path needs it."; \
+			echo "The path would resolve to /build/... and the build would"; \
+			echo "substitute a dummy blob. Enter the dev shell with make shell."; \
+			exit 1; }; ;; esac; \
 	fw=$$(eval echo "$$fw"); \
 	case "$$fw" in /*) ;; *) fw="$(NUTTX_DIR)/$$fw" ;; esac; \
 	if test ! -s "$$fw" || test "$$(stat -c%s "$$fw")" -lt 100000; then \

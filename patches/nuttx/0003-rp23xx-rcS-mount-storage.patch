@@ -1,0 +1,22 @@
+diff --git a/boards/arm/rp23xx/raspberrypi-pico-2/src/etc/init.d/rcS b/boards/arm/rp23xx/raspberrypi-pico-2/src/etc/init.d/rcS
+index 7eb01155..222c7607 100644
+--- a/boards/arm/rp23xx/raspberrypi-pico-2/src/etc/init.d/rcS
++++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/etc/init.d/rcS
+@@ -22,3 +22,17 @@
+ 
+ #include <nuttx/config.h>
+ 
++
++/* Mount the writable filesystems.  The rp23xx bringup registers /dev/rpflash
++ * but mounts nothing, so both of these have to happen here.  The autoformat
++ * option formats the flash only when the mount fails, so the contents survive
++ * a reboot.
++ */
++
++#ifdef CONFIG_FS_TMPFS
++mount -t tmpfs /tmp
++#endif
++
++#ifdef CONFIG_FS_LITTLEFS
++mount -t littlefs -o autoformat /dev/rpflash /data
++#endif

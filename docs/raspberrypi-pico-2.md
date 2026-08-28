@@ -72,8 +72,15 @@ Two ways to flash once the board is in BOOTSEL:
 - `configs/nuttx/raspberrypi-pico-2/usbnsh-wifi/defconfig` is `usbnsh-littlefs` plus the CYW43439 driver, the
   network stack, and the `wapi`, `ping`, and `renew` tools. It needs the patch and the firmware described
   under Wireless below.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13/defconfig` is `usbnsh-tools` plus the ST7789 driver, the
+  framebuffer, and `lcddev`, for the 1.3 inch 240x240 display. It needs the patch described under Two Things
+  the Tree Was Missing below.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi/defconfig` combines the two, and adds `CONFIG_FS_TMPFS`
+  and `CONFIG_ETC_ROMFS` so `/data` and `/tmp` are mounted before the shell starts. It gives the littlefs
+  region the rest of the flash, 3 MB rather than 1 MB. `CONFIG_ARCH_LEDS` has to stay off, because the
+  CYW43439 patch compiles out the LED sources that `board_autoled_on` lives in.
 
-Rebuild either one with:
+Rebuild any of them with:
 
 ```shell
 make nuttx-distclean
@@ -107,17 +114,18 @@ filesystems compiled in, so there is no writable storage at all. Three ways to c
 
 `CONFIG_MTD`, `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` are enough, and no board code is needed.
 `rp23xx_common_bringup.c` registers the region as `/dev/rpflash` on its own. The defaults place it 1 MB into
-flash and give it 1 MB, which clears the image with room to spare:
+flash and give it 1 MB, which clears the image with room to spare. The `usbnsh-lcd-wifi` configuration keeps
+the offset and takes the rest of the chip instead, so the region is 3 MB:
 
 ```
 CONFIG_RP23XX_FLASH_MTD_OFFSET=0x100000
-CONFIG_RP23XX_FLASH_MTD_SIZE=0x100000
+CONFIG_RP23XX_FLASH_MTD_SIZE=0x300000
 ```
 
 The driver refuses to initialize if the region would overlap `__flash_binary_end`, so the offset has to stay
 beyond the end of the image, on a 4096 byte erase sector boundary.
 
-Nothing is mounted automatically, apart from XIPFS when `CONFIG_FS_XIPFS` is set. Format and mount on the
+The bringup code mounts nothing, apart from XIPFS when `CONFIG_FS_XIPFS` is set. Format and mount on the
 first boot, then mount without the option afterwards:
 
 ```
@@ -125,9 +133,44 @@ mount -t littlefs -o autoformat /dev/rpflash /mnt
 mount -t littlefs /dev/rpflash /mnt
 ```
 
-`df` then reports 256 blocks of 4096 bytes. Files written to `/mnt` survive `reboot`, a power cycle, and
+`-o` has to come before the paths. `cmd_mount` parses with getopt, which stops at the first argument that is
+not an option, so a trailing `-o autoformat` is read as two more paths and the command fails with "too many
+arguments". The `usbnsh-lcd-wifi` configuration mounts it at boot instead; see the section below.
+
+Changing `CONFIG_RP23XX_FLASH_MTD_SIZE` changes the geometry littlefs expects, so a region formatted at the
+old size no longer mounts. The failure is `EINVAL`, and `autoformat` does not cover it, because that option
+only fires on `EFAULT`. Reformat once with `-o forceformat` after a size change.
+
+`df` then reports 4096 byte blocks, 256 of them at 1 MB and 768 at 3 MB. Files written to `/mnt` survive `reboot`, a power cycle, and
 reflashing the firmware, because the region starts beyond the image. An image that grew past the 1 MB offset
 would collide with it, and the driver refuses to initialize in that case rather than corrupting the data.
+
+### Mounting at Boot
+
+`CONFIG_ETC_ROMFS` and `CONFIG_FS_ROMFS` build the board's `src/etc` directory into a small ROMFS image,
+mount it at `/etc`, and run `etc/init.d/rcS` before the shell starts. The board ships both `rcS` and
+`rc.sysinit` with nothing in them but a license header, so the mounts go in `rcS`, which
+`patches/nuttx/0003-rp23xx-rcS-mount-storage.patch` does:
+
+```
+mount -t tmpfs /tmp
+mount -t littlefs -o autoformat /dev/rpflash /data
+```
+
+The file passes through the C preprocessor, so `#ifdef` guards work and a `#` cannot start a comment. Use
+`/* */` instead. The generated copy lands in `boards/arm/rp23xx/common/etctmp/etc/init.d/rcS`, which is worth
+reading when a line does not do what it should.
+
+After this, `mount` reports four filesystems on a fresh boot:
+
+| Mount   | Type     | Size | Backing                       |
+| ------- | -------- | ---- | ----------------------------- |
+| `/data` | littlefs | 3 MB | internal flash, `/dev/rpflash` |
+| `/tmp`  | tmpfs    | RAM  | grows as it is used           |
+| `/etc`  | romfs    | 384 B | read-only, holds `rcS`       |
+| `/proc` | procfs   | 0 B  | kernel state                  |
+
+A file written to `/data` survives a reset, a power cycle, and a reflash.
 
 ### Shell Editing and History
 
