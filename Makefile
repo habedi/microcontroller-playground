@@ -205,6 +205,25 @@ nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent st
 cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs
 	uv run python tools/cyw43-firmware.py
 
+# Out-of-tree NuttX application.  nuttx-apps looks for apps/external and its
+# own .gitignore covers that name, so the symlink leaves the submodule clean
+# and the Kconfig generator picks the directory up on its own.
+
+EXTERNAL_APP ?= experiments/pico-face
+
+.PHONY: nuttx-link-app
+nuttx-link-app: ## Link EXTERNAL_APP into the NuttX apps tree as apps/external
+	@test -f "$(EXTERNAL_APP)/Kconfig" || { \
+		echo "EXTERNAL_APP must name a directory holding Kconfig, Make.defs,"; \
+		echo "and Makefile, for example EXTERNAL_APP=experiments/pico-face"; \
+		exit 1; }
+	ln -sfn "$(CURDIR)/$(EXTERNAL_APP)" external/nuttx-apps/external
+	@echo "apps/external -> $(EXTERNAL_APP)"
+
+.PHONY: nuttx-unlink-app
+nuttx-unlink-app: ## Remove the apps/external symlink
+	rm -f external/nuttx-apps/external
+
 .PHONY: nuttx-list-boards
 nuttx-list-boards: ## List the available NuttX boards and configurations
 	cd $(NUTTX_DIR) && ./tools/configure.sh -L
