@@ -134,6 +134,11 @@ Flashing depends on the chip family:
 Reach the serial console with `picocom` (for example `picocom -b 115200 /dev/ttyACM0`). Serial access needs membership in the `dialout` group on most
 Linux distributions (some use `uucp` instead).
 
+The port takes one reader at a time, and a terminal holding it makes every other attempt look like a hung board. `tools/board-mcp.py` is an MCP server that
+owns the port, waits for the prompt rather than sleeping a fixed time, and names the process holding the port when it cannot open it. It also strips MAC
+addresses and wireless scan details on the way out, so the Privacy rules below hold without depending on judgment. Prefer it over a one-off serial script.
+See `docs/board-mcp.md`.
+
 ## Toolchains
 
 - The Pico 2 builds with `arm-none-eabi-gcc`, provided by the dev shell.

@@ -9,4 +9,5 @@ dependencies = [
     "pre-commit >=4.6.2",
     "esptool >=4.8.0",
     "imgtool>=2.4.0",
+    "mcp >=2.1.0",
 ]

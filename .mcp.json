@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "board": {
+      "command": "uv",
+      "args": ["run", "--no-project", "python", "tools/board-mcp.py"],
+      "env": {
+        "BOARD_PORT": "/dev/ttyACM0",
+        "BOARD_BAUD": "115200"
+      }
+    }
+  }
+}
