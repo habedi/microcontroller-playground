@@ -1,0 +1,75 @@
+diff --git a/arch/arm/src/rp23xx/rp23xx_spi.c b/arch/arm/src/rp23xx/rp23xx_spi.c
+index 699a847c..7d94a510 100644
+--- a/arch/arm/src/rp23xx/rp23xx_spi.c
++++ b/arch/arm/src/rp23xx/rp23xx_spi.c
+@@ -38,7 +38,9 @@
+ #include <arch/board/board.h>
+ #include <nuttx/irq.h>
+ #include <nuttx/arch.h>
++#include <nuttx/clock.h>
+ #include <nuttx/mutex.h>
++#include <nuttx/semaphore.h>
+ #include <nuttx/spi/spi.h>
+ 
+ #include "arm_internal.h"
+@@ -61,6 +63,13 @@
+ 
+ #define RP23XX_SPI_FIFOSZ        8
+ 
++/* How long spi_dmatrxwait() waits for one DMA completion.  The largest
++ * transfer this driver carries is a full panel framebuffer, which takes tens
++ * of milliseconds, so a second expires only when a completion has been lost.
++ */
++
++#define RP23XX_SPI_DMA_TIMEOUT_MS 1000
++
+ /****************************************************************************
+  * Private Types
+  ****************************************************************************/
+@@ -1192,20 +1201,40 @@ static void spi_dmarxsetup(struct rp23xx_spidev_s *priv,
+ static void spi_dmatrxwait(struct rp23xx_spidev_s *priv)
+ {
+   uint32_t val;
++  bool lost = false;
++  int i;
+ 
+-  if (nxsem_wait_uninterruptible(&priv->dmasem) != OK)
+-    {
+-      spierr("dma error\n");
+-    }
++  /* One post per channel.  Waiting without a deadline turns a lost
++   * completion into a task that cannot be woken and cannot be killed, which
++   * takes the console down with it, so give up and report instead.
++   */
+ 
+-  if (nxsem_wait_uninterruptible(&priv->dmasem) != OK)
++  for (i = 0; i < 2; i++)
+     {
+-      spierr("dma error\n");
++      if (nxsem_tickwait_uninterruptible(&priv->dmasem,
++              MSEC2TICK(RP23XX_SPI_DMA_TIMEOUT_MS)) < 0)
++        {
++          spierr("dma timeout\n");
++          lost = true;
++          break;
++        }
+     }
+ 
+   rp23xx_dmastop(priv->txdmach);
+   rp23xx_dmastop(priv->rxdmach);
+ 
++  /* A completion that lands after the timeout would leave a count behind and
++   * let the next transfer return before its data arrived.  Both channels are
++   * stopped now, so drain whatever was left.
++   */
++
++  if (lost)
++    {
++      while (nxsem_trywait(&priv->dmasem) >= 0)
++        {
++        }
++    }
++
+   val = spi_getreg(priv, RP23XX_SPI_SSPDMACR_OFFSET);
+   val &= ~(RP23XX_SPI_SSPDMACR_RXDMAE | RP23XX_SPI_SSPDMACR_TXDMAE);
+   spi_putreg(priv, RP23XX_SPI_SSPDMACR_OFFSET, val);
