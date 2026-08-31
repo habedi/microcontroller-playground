@@ -51,7 +51,7 @@ static int render_into(uint16_t *buf, int w, int h, enum face_state state,
   face_tick(&f, t);
 
   memset(buf, 0, (size_t)w * (size_t)h * sizeof(uint16_t));
-  face_render(&s, &f.pose, &d);
+  face_render(&s, &f.pose, f.state, 0, 0, &d);
 
   return d.w == w && d.h == h;
 }
@@ -164,12 +164,12 @@ static void test_blink_changes_the_picture(void)
   p.glow = 400;
 
   s.pixels = open_buf;
-  face_render(&s, &p, &d);
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
 
   p.eye_open_l = 0;
   p.eye_open_r = 0;
   s.pixels = shut_buf;
-  face_render(&s, &p, &d);
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
 
   check(memcmp(open_buf, shut_buf, bytes) != 0, "shut eyes look different");
 
@@ -217,7 +217,7 @@ static void test_eyes_are_widest_in_the_middle(void)
   p.eye_open_r = FACE_UNIT;
   p.glow = 400;
 
-  face_render(&s, &p, &d);
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
   bg = buf[0];
 
   /* The eyes sit at 40 percent of the height and are 27 percent tall, so rows
@@ -284,7 +284,7 @@ static void test_smile_points_the_right_way(void)
   p.mouth_curve = FACE_UNIT;
   p.glow = 400;
 
-  face_render(&s, &p, &d);
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
   bg = buf[0];
 
   /* Topmost drawn pixel in the middle column, and in a column near the left
@@ -361,7 +361,7 @@ static void test_pupil_stays_inside_the_eye(void)
       p.glow = 400;
 
       s.pixels = centred;
-      face_render(&s, &p, &d);
+      face_render(&s, &p, FACE_IDLE, 0, 0, &d);
       bg = centred[0];
 
       for (i = 0; i < count; i++)
@@ -380,7 +380,7 @@ static void test_pupil_stays_inside_the_eye(void)
           p.pupil_y = offsets[k][1];
 
           s.pixels = moved;
-          face_render(&s, &p, &d);
+          face_render(&s, &p, FACE_IDLE, 0, 0, &d);
 
           for (i = 0; i < count; i++)
             {

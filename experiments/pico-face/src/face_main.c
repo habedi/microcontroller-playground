@@ -1,9 +1,10 @@
 /****************************************************************************
  * experiments/pico-face/src/face_main.c
  *
- * NuttX side of the face: opens the framebuffer, runs the render loop, and
- * reads the current state out of a small file so anything on the board or on
- * the network can drive the expression with one echo.
+ * NuttX side of the face: opens the framebuffer, runs the render loop, reads
+ * the current state out of a small file so anything on the board or on the
+ * network can drive the expression with one echo, and reads the panel's
+ * joystick and buttons so the look can be changed at the board.
  *
  ****************************************************************************/
 
@@ -22,7 +23,10 @@
 
 #include <nuttx/video/fb.h>
 
-#include "face_render.h"
+#include "face_input.h"
+#include "face_overlay.h"
+#include "face_preset.h"
+#include "face_sprite.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -32,19 +36,55 @@
 #  define CONFIG_PICO_FACE_STATE_FILE "/tmp/face"
 #endif
 
+#ifndef CONFIG_PICO_FACE_BUTTONS_DEV
+#  define CONFIG_PICO_FACE_BUTTONS_DEV "/dev/buttons"
+#endif
+
 /* Target frame interval.  The panel can go faster than this, but there is
  * nothing to be gained: a blink is 150 ms long.
  */
 
 #define FRAME_MS 33
 
-/* How often the state file is re-read.  Reading a few bytes out of tmpfs is
- * cheap, so this is generous rather than clever.
+/* How often the state file and the buttons are read.  Reading a few bytes
+ * out of tmpfs is cheap, so this is generous rather than clever, and at
+ * 100 ms a button sample is already past any contact bounce.
  */
 
 #define POLL_MS 100
 
 #define BENCH_FRAMES 120
+
+/* Animation speeds the X button steps through, as a percentage of real
+ * time.  The middle one is the default.
+ */
+
+static const int g_speeds[] = { 50, 100, 200 };
+
+#define NSPEEDS ((int)(sizeof(g_speeds) / sizeof(g_speeds[0])))
+
+/* Software brightness steps the joystick moves between, as a percentage.
+ * This dims the pixels rather than the backlight, because the backlight pin
+ * is a plain GPIO in the board glue and only knows on and off.
+ */
+
+#define BRIGHT_MIN  25
+#define BRIGHT_MAX  100
+#define BRIGHT_STEP 25
+
+/****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+struct ui
+{
+  int preset;
+  int palette;
+  int speed;      /* index into g_speeds */
+  int bright;     /* percent */
+  bool hold;      /* ignore the state file */
+  bool overlay;
+};
 
 /****************************************************************************
  * Private Functions
@@ -198,6 +238,89 @@ static void push(int fd, const struct face_dirty *dirty)
 #endif
 }
 
+/* Scales every channel of every pixel.  Skipped entirely at full brightness,
+ * which is the usual case, so the cost is only paid when it is asked for.
+ */
+
+static void dim_surface(const struct face_surface *s, int percent)
+{
+  int x;
+  int y;
+
+  if (percent >= 100)
+    {
+      return;
+    }
+
+  for (y = 0; y < s->height; y++)
+    {
+      uint16_t *row = s->pixels + (size_t)y * (size_t)s->stride_px;
+
+      for (x = 0; x < s->width; x++)
+        {
+          uint16_t c = row[x];
+          int r = ((c >> 11) & 0x1f) * percent / 100;
+          int g = ((c >> 5) & 0x3f) * percent / 100;
+          int b = (c & 0x1f) * percent / 100;
+
+          row[x] = (uint16_t)((r << 11) | (g << 5) | b);
+        }
+    }
+}
+
+/* Applies one button action.  Returns true when the caller should redraw
+ * even though nothing else changed.
+ */
+
+static void apply(struct ui *ui, enum face_action action)
+{
+  switch (action)
+    {
+      case FACE_ACT_PRESET_NEXT:
+        ui->preset = face_preset_wrap(ui->preset + 1);
+        break;
+
+      case FACE_ACT_PRESET_PREV:
+        ui->preset = face_preset_wrap(ui->preset - 1);
+        break;
+
+      case FACE_ACT_BRIGHT_UP:
+        ui->bright += BRIGHT_STEP;
+        if (ui->bright > BRIGHT_MAX)
+          {
+            ui->bright = BRIGHT_MAX;
+          }
+        break;
+
+      case FACE_ACT_BRIGHT_DOWN:
+        ui->bright -= BRIGHT_STEP;
+        if (ui->bright < BRIGHT_MIN)
+          {
+            ui->bright = BRIGHT_MIN;
+          }
+        break;
+
+      case FACE_ACT_HOLD:
+        ui->hold = !ui->hold;
+        break;
+
+      case FACE_ACT_PALETTE:
+        ui->palette = (ui->palette + 1) % FACE_NPALETTES;
+        break;
+
+      case FACE_ACT_SPEED:
+        ui->speed = (ui->speed + 1) % NSPEEDS;
+        break;
+
+      case FACE_ACT_OVERLAY:
+        ui->overlay = !ui->overlay;
+        break;
+
+      default:
+        break;
+    }
+}
+
 /* Draws as fast as the panel allows and reports the rate.  This is the number
  * that decides whether any animated idea on top of this is possible.
  */
@@ -223,7 +346,7 @@ static int benchmark(void)
   for (i = 0; i < BENCH_FRAMES; i++)
     {
       face_tick(&f, now_ms());
-      face_render(&surface, &f.pose, &dirty);
+      face_preset(0)->render(&surface, &f.pose, f.state, now_ms(), 0, &dirty);
       push(fd, &dirty);
     }
 
@@ -248,9 +371,17 @@ static int run(void)
   struct face_surface surface;
   struct face_dirty dirty;
   struct face f;
+  struct ui ui;
   enum face_state wanted;
   uint32_t last_poll;
+  uint32_t last_real;
+  uint32_t anim_ms;
+  uint32_t fps_mark;
+  unsigned int frames = 0;
+  unsigned int fps = 0;
+  uint32_t buttons = 0;
   bool quit = false;
+  int btnfd;
   int fd;
 
   if (open_surface(&fd, &surface) != 0)
@@ -258,31 +389,95 @@ static int run(void)
       return 1;
     }
 
-  printf("face: %dx%d, state from %s\n", surface.width, surface.height,
-         CONFIG_PICO_FACE_STATE_FILE);
+  ui.preset  = 0;
+  ui.palette = 0;
+  ui.speed   = 1;
+  ui.bright  = BRIGHT_MAX;
+  ui.hold    = false;
+  ui.overlay = false;
+
+  /* The buttons are optional.  A build without them, or a board where the
+   * driver did not register, still runs the face from the state file.
+   */
+
+  btnfd = open(CONFIG_PICO_FACE_BUTTONS_DEV, O_RDONLY | O_NONBLOCK);
+  if (btnfd < 0)
+    {
+      printf("face: no %s, running without the panel controls\n",
+             CONFIG_PICO_FACE_BUTTONS_DEV);
+    }
+
+  printf("face: %dx%d, state from %s, %d presets\n", surface.width,
+         surface.height, CONFIG_PICO_FACE_STATE_FILE, face_preset_count());
 
   face_init(&f, now_ms());
   last_poll = now_ms();
+  last_real = last_poll;
+  fps_mark  = last_poll;
+  anim_ms   = 0;
 
   while (!quit)
     {
+      const struct face_preset *preset = face_preset(ui.preset);
       uint32_t t = now_ms();
+
+      /* The animation runs on its own clock, so changing the speed bends the
+       * rate from here on rather than jumping the pose.
+       */
+
+      anim_ms += ((t - last_real) * (uint32_t)g_speeds[ui.speed]) / 100u;
+      last_real = t;
 
       if (t - last_poll >= POLL_MS)
         {
           last_poll = t;
 
-          if (read_state(&wanted, &quit) && wanted != f.state)
+          if (btnfd >= 0)
             {
-              face_set_state(&f, wanted, t);
+              uint32_t sample = 0;
+
+              if (read(btnfd, &sample, sizeof(sample)) == (ssize_t)sizeof(sample))
+                {
+                  apply(&ui, face_input_action(sample, buttons));
+                  buttons = sample;
+                }
+            }
+
+          if (!ui.hold && read_state(&wanted, &quit) && wanted != f.state)
+            {
+              face_set_state(&f, wanted, anim_ms);
             }
         }
 
-      face_tick(&f, t);
-      face_render(&surface, &f.pose, &dirty);
+      face_tick(&f, anim_ms);
+
+      preset->render(&surface, &f.pose, f.state, anim_ms, ui.palette, &dirty);
+
+      if (ui.overlay)
+        {
+          face_overlay(&surface, face_palette(ui.palette), preset->name,
+                       face_palette(ui.palette)->name,
+                       face_state_name(f.state), fps, ui.hold,
+                       g_speeds[ui.speed]);
+        }
+
+      dim_surface(&surface, ui.bright);
       push(fd, &dirty);
 
+      frames++;
+      if (t - fps_mark >= 1000)
+        {
+          fps = frames;
+          frames = 0;
+          fps_mark = t;
+        }
+
       usleep(FRAME_MS * 1000);
+    }
+
+  if (btnfd >= 0)
+    {
+      close(btnfd);
     }
 
   close(fd);

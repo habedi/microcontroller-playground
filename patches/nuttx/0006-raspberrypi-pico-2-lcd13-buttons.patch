@@ -1,0 +1,134 @@
+--- a/boards/arm/rp23xx/raspberrypi-pico-2/include/board.h
++++ b/boards/arm/rp23xx/raspberrypi-pico-2/include/board.h
+@@ -113,12 +113,35 @@
+ 
+ /* BUTTON definitions *******************************************************/
+ 
+-#define NUM_BUTTONS       0
++/* The Waveshare Pico-LCD-1.3 carries a five way joystick and four keys.
++ * They are plain GPIO pads that short to ground, so the pads need their
++ * pull-ups on and a pressed control reads low.
++ *
++ * The order here is the bit order in the mask that board_buttons() returns
++ * and that /dev/buttons reports, so it has to match the reader.
++ */
+ 
+-#define BUTTON_USER1      0
+-#define BUTTON_USER2      1
+-#define BUTTON_USER1_BIT  (1 << BUTTON_USER1)
+-#define BUTTON_USER2_BIT  (1 << BUTTON_USER2)
++#define NUM_BUTTONS       9
++
++#define BUTTON_UP         0
++#define BUTTON_DOWN       1
++#define BUTTON_LEFT       2
++#define BUTTON_RIGHT      3
++#define BUTTON_PRESS      4
++#define BUTTON_A          5
++#define BUTTON_B          6
++#define BUTTON_X          7
++#define BUTTON_Y          8
++
++#define BUTTON_UP_BIT     (1 << BUTTON_UP)
++#define BUTTON_DOWN_BIT   (1 << BUTTON_DOWN)
++#define BUTTON_LEFT_BIT   (1 << BUTTON_LEFT)
++#define BUTTON_RIGHT_BIT  (1 << BUTTON_RIGHT)
++#define BUTTON_PRESS_BIT  (1 << BUTTON_PRESS)
++#define BUTTON_A_BIT      (1 << BUTTON_A)
++#define BUTTON_B_BIT      (1 << BUTTON_B)
++#define BUTTON_X_BIT      (1 << BUTTON_X)
++#define BUTTON_Y_BIT      (1 << BUTTON_Y)
+ 
+ /****************************************************************************
+  * Public Types
+--- a/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_pico.h
++++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_pico.h
+@@ -55,14 +55,26 @@
+ 
+ /* Buttons GPIO pins definition */
+ 
+-#define GPIO_BTN_USER1     16
+-#define GPIO_BTN_USER2     17
++/* Waveshare Pico-LCD-1.3 controls, in the same order as the BUTTON_
++ * definitions in board.h.  None of these clash with the panel, which uses
++ * GPIO 8 to 13, or with the wireless chip, which uses 23 to 25 and 29.
++ */
++
++#define GPIO_BTN_UP        2
++#define GPIO_BTN_DOWN     18
++#define GPIO_BTN_LEFT     16
++#define GPIO_BTN_RIGHT    20
++#define GPIO_BTN_PRESS     3
++#define GPIO_BTN_A        15
++#define GPIO_BTN_B        17
++#define GPIO_BTN_X        19
++#define GPIO_BTN_Y        21
+ 
+ /* Buttons IRQ definitions */
+ 
+-#define MIN_IRQBUTTON     BUTTON_USER1
+-#define MAX_IRQBUTTON     BUTTON_USER2
+-#define NUM_IRQBUTTONS    (BUTTON_USER1 - BUTTON_USER2 + 1)
++#define MIN_IRQBUTTON     BUTTON_UP
++#define MAX_IRQBUTTON     BUTTON_Y
++#define NUM_IRQBUTTONS    (MAX_IRQBUTTON - MIN_IRQBUTTON + 1)
+ 
+ int rp23xx_bringup(void);
+ 
+--- a/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_buttons.c
++++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_buttons.c
+@@ -52,7 +52,8 @@
+ 
+ static const uint32_t g_buttons[NUM_BUTTONS] =
+ {
+-  GPIO_BTN_USER1, GPIO_BTN_USER2
++  GPIO_BTN_UP, GPIO_BTN_DOWN, GPIO_BTN_LEFT, GPIO_BTN_RIGHT,
++  GPIO_BTN_PRESS, GPIO_BTN_A, GPIO_BTN_B, GPIO_BTN_X, GPIO_BTN_Y
+ };
+ 
+ /****************************************************************************
+@@ -82,9 +83,11 @@
+ 
+       rp23xx_gpio_init(g_buttons[i]);
+ 
+-      /* pull-up = false : pull-down = false */
++      /* The controls short the pad to ground, so the pad needs its pull-up
++       * on.  Without it an unpressed input floats and reads as noise.
++       */
+ 
+-      rp23xx_gpio_set_pulls(g_buttons[i], false, false);
++      rp23xx_gpio_set_pulls(g_buttons[i], true, false);
+     }
+ 
+   return NUM_BUTTONS;
+--- a/boards/Kconfig
++++ b/boards/Kconfig
+@@ -2248,9 +2248,15 @@
+ 	bool "Raspberry Pi Pico 2 board (not Pico, not W)"
+ 	depends on ARCH_CHIP_RP23XX
+ 	select ARCH_HAVE_LEDS
++	select ARCH_HAVE_BUTTONS
++	select ARCH_HAVE_IRQBUTTONS
+ 	---help---
+ 		This is a port to the Raspberry Pi Pico 2 board.
+ 
++		The buttons are the joystick and four keys on a Waveshare
++		Pico-LCD-1.3, which is the only button hardware this board has
++		been used with.
++
+ config ARCH_BOARD_RASPBERRYPI_PICO_2_RV
+ 	bool "Raspberry Pi Pico 2 board RISC-V (not Pico, not W)"
+ 	depends on ARCH_CHIP_RP23XX_RV
+--- a/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_bringup.c
++++ b/boards/arm/rp23xx/raspberrypi-pico-2/src/rp23xx_bringup.c
+@@ -45,6 +45,10 @@
+ #  include <nuttx/leds/userled.h>
+ #endif
+ 
++#ifdef CONFIG_INPUT_BUTTONS
++#  include <nuttx/input/buttons.h>
++#endif
++
+ /****************************************************************************
+  * Public Data
+  ****************************************************************************/

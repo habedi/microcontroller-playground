@@ -276,6 +276,7 @@ static void parabola(const struct face_surface *s, int cx, int cy, int w,
  ****************************************************************************/
 
 void face_render(const struct face_surface *s, const struct face_pose *pose,
+                 enum face_state state, uint32_t now_ms, int palette,
                  struct face_dirty *dirty)
 {
   int eye_w   = pct(s->width, EYE_W_PCT);
@@ -286,6 +287,14 @@ void face_render(const struct face_surface *s, const struct face_pose *pose,
   int eye_h[2];
   int pr;
   int i;
+
+  /* This preset draws its own colours and takes its whole shape from the
+   * pose, so the state, the clock, and the palette are not needed here.
+   */
+
+  (void)state;
+  (void)now_ms;
+  (void)palette;
 
   /* Palette.  A warm amber on near black, brightened by the glow, which is
    * the only thing that changes colour rather than shape.

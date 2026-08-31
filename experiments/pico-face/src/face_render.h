@@ -42,7 +42,12 @@ struct face_dirty
   int h;
 };
 
+/* The vector preset.  Takes the state, the clock, and a palette index for
+ * signature compatibility with the pixel presets, and uses none of them.
+ */
+
 void face_render(const struct face_surface *s, const struct face_pose *pose,
+                 enum face_state state, uint32_t now_ms, int palette,
                  struct face_dirty *dirty);
 
 #endif /* __EXPERIMENTS_PICO_FACE_SRC_FACE_RENDER_H */

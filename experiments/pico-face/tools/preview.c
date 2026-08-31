@@ -1,9 +1,12 @@
 /****************************************************************************
  * experiments/pico-face/tools/preview.c
  *
- * Renders the six expressions into one contact sheet on the host, so the
- * design can be judged without flashing the board.  Writes a binary PPM to
- * standard output.
+ * Renders every preset against every expression into one contact sheet on
+ * the host, so the art can be judged without flashing the board.  One row per
+ * preset, one column per expression.  Writes a binary PPM to standard output.
+ *
+ * Takes an optional time in milliseconds, which decides where the blink and
+ * the bob have got to, and an optional palette index.
  *
  ****************************************************************************/
 
@@ -11,15 +14,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "face_render.h"
+#include "face_preset.h"
+#include "face_sprite.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
 #define PANEL 240
-#define COLS  3
-#define ROWS  2
 #define GAP   8
 
 /****************************************************************************
@@ -49,11 +51,15 @@ static void blit(uint16_t *sheet, int sheet_w, const uint16_t *panel,
 
 int main(int argc, char **argv)
 {
-  int sheet_w = GAP + COLS * (PANEL + GAP);
-  int sheet_h = GAP + ROWS * (PANEL + GAP);
+  int cols = FACE_NSTATES;
+  int rows = face_preset_count();
+  int sheet_w = GAP + cols * (PANEL + GAP);
+  int sheet_h = GAP + rows * (PANEL + GAP);
   uint16_t *sheet;
   uint16_t *panel;
   uint32_t when_ms = 500;
+  int palette = 0;
+  int p;
   int s;
   int y;
   int x;
@@ -61,6 +67,11 @@ int main(int argc, char **argv)
   if (argc > 1)
     {
       when_ms = (uint32_t)strtoul(argv[1], NULL, 10);
+    }
+
+  if (argc > 2)
+    {
+      palette = (int)strtol(argv[2], NULL, 10);
     }
 
   sheet = calloc((size_t)sheet_w * (size_t)sheet_h, sizeof(uint16_t));
@@ -73,25 +84,35 @@ int main(int argc, char **argv)
       return 1;
     }
 
-  for (s = 0; s < FACE_NSTATES; s++)
+  fprintf(stderr, "t=%lu ms, palette %d (%s)\n", (unsigned long)when_ms,
+          palette, face_palette(palette)->name);
+
+  for (p = 0; p < rows; p++)
     {
-      struct face_surface surf;
-      struct face_dirty dirty;
-      struct face f;
+      const struct face_preset *preset = face_preset(p);
 
-      surf.pixels = panel;
-      surf.width = PANEL;
-      surf.height = PANEL;
-      surf.stride_px = PANEL;
+      fprintf(stderr, "  row %d: %s\n", p, preset->name);
 
-      face_init(&f, 0);
-      face_set_state(&f, (enum face_state)s, 0);
-      face_tick(&f, when_ms);
-      face_render(&surf, &f.pose, &dirty);
+      for (s = 0; s < cols; s++)
+        {
+          struct face_surface surf;
+          struct face_dirty dirty;
+          struct face f;
 
-      blit(sheet, sheet_w, panel, s % COLS, s / COLS);
-      fprintf(stderr, "  tile %d,%d  %s\n", s % COLS, s / COLS,
-              face_state_name((enum face_state)s));
+          surf.pixels = panel;
+          surf.width = PANEL;
+          surf.height = PANEL;
+          surf.stride_px = PANEL;
+
+          face_init(&f, 0);
+          face_set_state(&f, (enum face_state)s, 0);
+          face_tick(&f, when_ms);
+
+          preset->render(&surf, &f.pose, (enum face_state)s, when_ms,
+                         palette, &dirty);
+
+          blit(sheet, sheet_w, panel, s, p);
+        }
     }
 
   printf("P6\n%d %d\n255\n", sheet_w, sheet_h);

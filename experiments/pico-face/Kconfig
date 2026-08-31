@@ -26,6 +26,14 @@ config PICO_FACE_STACKSIZE
 	int "Stack size"
 	default 4096
 
+config PICO_FACE_BUTTONS_DEV
+	string "Buttons device"
+	default "/dev/buttons"
+	---help---
+		The joystick and the four buttons on the panel, as registered by
+		btn_lower_initialize().  The face runs without them when the device
+		is missing, so a build with no button support still works.
+
 config PICO_FACE_STATE_FILE
 	string "State file"
 	default "/tmp/face"
