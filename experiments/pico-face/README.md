@@ -115,25 +115,44 @@ the render loop.
 
 ### Driving It from Claude Code
 
-The expressions are named after Claude Code's hooks, which is the intended
-source:
+`tools/face-hook.py` is the bridge. Claude Code runs it on each event, it works
+out which expression the event means, and the board follows a second or two
+later.
 
 | Hook | Word |
 | ---- | ---- |
-| `SessionStart` | `idle` |
-| `PreToolUse` | `working`, or `editing` for Edit and Write |
+| `SessionStart`, `SessionEnd` | `idle` |
+| `PreToolUse` | `working`, or `editing` for Edit, Write, and NotebookEdit |
+| `PostToolUse` when the response looks like an error | `failed` |
 | `Notification` | `waiting` |
-| `PostToolUse` on an error | `failed` |
-| `Stop` | `done` |
+| `Stop`, `SubagentStop` | `done` |
 
-The bridge from the host to the board is not written yet. The board has no
-endpoint that accepts a state, so today a hook would have to write the word
-down the serial console, which fights with whatever else holds the port. Two
-ways out, either of which is its own small project:
+A hook runs in front of the thing it reports on, so it has to be quick, and a
+serial round trip to the board takes a second or two. So the script splits in
+two. The half a hook calls decides the word, writes it to a spool file, starts a
+detached copy of itself, and exits. Measured at 18 to 22 ms, and it imports no
+serial code at all. The detached half takes a lock and does the talking. If
+another copy already holds the lock it gives up rather than queueing, because
+the copy holding it will read whatever the newest word is. The last event wins
+and a backlog cannot build up.
 
-- A small HTTP endpoint on the board whose only job is to write `/tmp/face`.
-  The Wi-Fi already works.
-- An MCP server on the host that owns the serial port and arbitrates access.
+It never prints anything and always exits zero. A hook that complains gets in
+the way of the session it is meant to describe.
+
+The wiring lives in `.claude/settings.local.json`, which this repository's
+`.gitignore` covers, so it stays on one machine. The script in `tools/` is
+committed; only the six hook entries pointing at it are local.
+
+Two limits worth knowing:
+
+- Failure detection is a guess. There is no dedicated field saying a tool
+  failed, so the script reads the response the way a person would and will miss
+  cases.
+- The spool and lock paths deliberately avoid `tempfile.gettempdir()`, which
+  follows `TMPDIR`. The two halves have to agree on the path, and `TMPDIR` is
+  not the same in every context a hook runs from. The first version used it and
+  the two halves wrote and read different files, so the timings looked right
+  while nothing reached the board.
 
 ### Not Done Yet
 
