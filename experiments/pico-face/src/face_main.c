@@ -408,6 +408,17 @@ static int run(void)
   printf("face: %dx%d, state from %s, %d presets\n", surface.width,
          surface.height, CONFIG_PICO_FACE_STATE_FILE, face_preset_count());
 
+  /* A quit word left over from the last run would stop this one on its
+   * first poll.  It is consumed here rather than removed by the loop that
+   * quits, so that every loop reading the file sees it and stops.
+   */
+
+  if (read_state(&wanted, &quit) == false && quit)
+    {
+      unlink(CONFIG_PICO_FACE_STATE_FILE);
+      quit = false;
+    }
+
   /* The face is ticked on the animation clock below, so it has to start on
    * that clock too.  Starting it on the real clock leaves it waiting for the
    * animation clock to catch up, which is a frozen face for as long as the
@@ -490,13 +501,6 @@ static int run(void)
     }
 
   close(fd);
-
-  /* Leave no quit word behind, or the next face & would read it on its
-   * first poll and stop again.
-   */
-
-  unlink(CONFIG_PICO_FACE_STATE_FILE);
-
   printf("face: stopped\n");
   return 0;
 }

@@ -5,7 +5,7 @@ Code is doing. The point is a status display you read at a glance instead of
 switching windows: the eyes narrow while a tool runs, the face looks down while
 files change, and it looks up and pulses when it is waiting on you.
 
-Board: Raspberry Pi Pico 2 WH with the Waveshare 1.3 inch LCD hat.
+Board: Raspberry Pi Pico 2 WH with the Waveshare 1.3-inch LCD hat.
 OS: Apache NuttX, configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi`.
 
 ### Status
@@ -131,6 +131,11 @@ render loop polls, so anything that can write that file can drive the face.
 The six words are `idle`, `working`, `editing`, `waiting`, `failed`, and
 `done`. An unknown word is rejected where it is typed rather than ignored by
 the render loop.
+
+`quit` is the only way to stop the loop, since `kill` does nothing in this
+configuration. The word stays in the file so that every running loop sees it,
+and a loop that starts later removes it before its first poll rather than
+stopping on it. Hold ignores the expression in the file, not the quit word.
 
 ### Presets
 
