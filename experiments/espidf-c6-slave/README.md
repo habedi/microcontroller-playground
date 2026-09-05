@@ -8,6 +8,13 @@ on the radio chip and answers the P4 over SDIO.
 - Result: builds, 640 KB application. Not yet flashed, because that needs a UART adapter on the `PROG_C6`
   header.
 
+
+### The Board Is Not Espressif's Reference
+
+This board is a Waveshare ESP32-P4-WIFI6, not the ESP32-P4-Function-EV-Board that earlier notes named. It has no
+`PROG_C6` header. Waveshare exposes the C6 as "ESP32-C6 UART Pads", so any mention of that header below describes
+Espressif's board and not this one. Reaching the C6 here needs a soldered connection.
+
 ### Why This Exists
 
 The C6 ships with ESP-Hosted slave firmware v0.0.6 and does not enumerate as an SDIO card. Three host

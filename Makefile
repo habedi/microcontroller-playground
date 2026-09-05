@@ -47,10 +47,11 @@ ESPIDF_SRC    ?= experiments/espidf-hello
 ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
 ESPIDF_PORT   ?= /dev/ttyACM0
 
-# The onboard ESP32-C6 is reached through the PROG_C6 header with a 3.3 V USB
-# to UART adapter, which appears as /dev/ttyUSB0 rather than /dev/ttyACM0. No
-# ESP32-P4 GPIO on this board reaches the C6's bootstrap, so it cannot be
-# flashed from the P4. See docs/esp32p4.md.
+# The onboard ESP32-C6 is reached with a 3.3 V USB to UART adapter, which
+# appears as /dev/ttyUSB0 rather than /dev/ttyACM0. This board exposes the C6
+# only as solder pads, so the joints have to be soldered. No ESP32-P4 GPIO
+# reaches the C6's bootstrap either, so it cannot be flashed from the P4. See
+# docs/esp32p4.md.
 C6_PORT       ?= /dev/ttyUSB0
 C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
 
@@ -155,6 +156,12 @@ test-hooks: ## Run the Git hooks on all files
 	uv run pre-commit run --all-files --hook-stage pre-push
 
 # NuttX. A second OS gets its own prefixed group (zephyr-build, and so on).
+#
+# The patches in a set stack: a later one may edit lines an earlier one added,
+# so the earlier one no longer reverses on its own once the later one is on.
+# A patch that applies in neither direction is therefore taken as applied when
+# every file it touches is already modified or added in the tree. The reverse
+# check is still tried first, since it is the stricter answer when it works.
 .PHONY: nuttx-patch
 nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 	@for set in $(PATCH_SETS); do \
@@ -168,19 +175,33 @@ nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 			     2>/dev/null; then \
 				echo "already applied $$p"; \
 			else \
-				echo "ERROR: $$p does not apply cleanly to $$dir"; \
-				echo "Run make nuttx-repatch to reset the patch state."; \
-				exit 1; \
+				touched=1; \
+				for f in $$(sed -n 's|^+++ b/||p' "$$p"); do \
+					if git -C $$dir ls-files --error-unmatch "$$f" \
+					     >/dev/null 2>&1; then \
+						git -C $$dir diff --quiet -- "$$f" && touched=0; \
+					else \
+						test -f $$dir/$$f || touched=0; \
+					fi; \
+				done; \
+				if [ $$touched = 1 ]; then \
+					echo "already applied $$p (under a later patch)"; \
+				else \
+					echo "ERROR: $$p does not apply cleanly to $$dir"; \
+					echo "Run make nuttx-repatch to reset the patch state."; \
+					exit 1; \
+				fi; \
 			fi; \
 		done; \
 	done
 
+# Reverted last to first, since a later patch may sit on top of an earlier one.
 .PHONY: nuttx-unpatch
 nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
 	@for set in $(PATCH_SETS); do \
 		dir=$${set%%:*}; pdir=$${set#*:}; \
 		test -d "$$pdir" || continue; \
-		for p in $$pdir/*.patch; do \
+		for p in $$(ls -r $$pdir/*.patch 2>/dev/null); do \
 			test -f "$$p" || continue; \
 			git -C $$dir apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
 				echo "reverted $$p" || echo "not applied $$p"; \
@@ -203,6 +224,25 @@ nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent st
 .PHONY: cyw43-firmware
 cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs
 	uv run python tools/cyw43-firmware.py
+
+# Out-of-tree NuttX application.  nuttx-apps looks for apps/external and its
+# own .gitignore covers that name, so the symlink leaves the submodule clean
+# and the Kconfig generator picks the directory up on its own.
+
+EXTERNAL_APP ?= experiments/pico-face
+
+.PHONY: nuttx-link-app
+nuttx-link-app: ## Link EXTERNAL_APP into the NuttX apps tree as apps/external
+	@test -f "$(EXTERNAL_APP)/Kconfig" || { \
+		echo "EXTERNAL_APP must name a directory holding Kconfig, Make.defs,"; \
+		echo "and Makefile, for example EXTERNAL_APP=experiments/pico-face"; \
+		exit 1; }
+	ln -sfn "$(CURDIR)/$(EXTERNAL_APP)" external/nuttx-apps/external
+	@echo "apps/external -> $(EXTERNAL_APP)"
+
+.PHONY: nuttx-unlink-app
+nuttx-unlink-app: ## Remove the apps/external symlink
+	rm -f external/nuttx-apps/external
 
 .PHONY: nuttx-list-boards
 nuttx-list-boards: ## List the available NuttX boards and configurations
@@ -253,6 +293,12 @@ nuttx-check-toolchain:
 		exit 1; }; \
 	fw=$$(sed -n 's/^CONFIG_CYW43439_FIRMWARE_BIN_PATH="\(.*\)"$$/\1/p' \
 	  $(NUTTX_DIR)/.config); \
+	case "$$fw" in *PLAYGROUND_ROOT*) \
+		test -n "$$PLAYGROUND_ROOT" || { \
+			echo "PLAYGROUND_ROOT is unset, and the firmware path needs it."; \
+			echo "The path would resolve to /build/... and the build would"; \
+			echo "substitute a dummy blob. Enter the dev shell with make shell."; \
+			exit 1; }; ;; esac; \
 	fw=$$(eval echo "$$fw"); \
 	case "$$fw" in /*) ;; *) fw="$(NUTTX_DIR)/$$fw" ;; esac; \
 	if test ! -s "$$fw" || test "$$(stat -c%s "$$fw")" -lt 100000; then \
@@ -353,7 +399,8 @@ espidf-flash-c6: ## Flash ESP-Hosted firmware to the C6 through a UART adapter o
 		echo "  make espidf-build ESPIDF_SRC=experiments/espidf-c6-slave \\"; \
 		echo "       ESPIDF_TARGET=esp32c6"; \
 		exit 1; }
-	@echo "Wire the adapter to PROG_C6: EN, TXD, RXD, GND. Do not connect VDD."
+	@echo "Wire the adapter to the ESP32-C6 UART pads: EN, TXD, RXD, GND."
+	@echo "Do not connect VDD. They are pads, so the joints need soldering."
 	@echo "Hold the P4 in its bootloader so it does not drive the bus."
 	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
 		. $(ESPIDF_DIR)/export.sh >/dev/null && \

@@ -72,8 +72,15 @@ Two ways to flash once the board is in BOOTSEL:
 - `configs/nuttx/raspberrypi-pico-2/usbnsh-wifi/defconfig` is `usbnsh-littlefs` plus the CYW43439 driver, the
   network stack, and the `wapi`, `ping`, and `renew` tools. It needs the patch and the firmware described
   under Wireless below.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13/defconfig` is `usbnsh-tools` plus the ST7789 driver, the
+  framebuffer, and `lcddev`, for the 1.3 inch 240x240 display. It needs the patch described under Two Things
+  the Tree Was Missing below.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi/defconfig` combines the two, and adds `CONFIG_FS_TMPFS`
+  and `CONFIG_ETC_ROMFS` so `/data` and `/tmp` are mounted before the shell starts. It gives the littlefs
+  region the rest of the flash, 3 MB rather than 1 MB. `CONFIG_ARCH_LEDS` has to stay off, because the
+  CYW43439 patch compiles out the LED sources that `board_autoled_on` lives in.
 
-Rebuild either one with:
+Rebuild any of them with:
 
 ```shell
 make nuttx-distclean
@@ -107,17 +114,18 @@ filesystems compiled in, so there is no writable storage at all. Three ways to c
 
 `CONFIG_MTD`, `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` are enough, and no board code is needed.
 `rp23xx_common_bringup.c` registers the region as `/dev/rpflash` on its own. The defaults place it 1 MB into
-flash and give it 1 MB, which clears the image with room to spare:
+flash and give it 1 MB, which clears the image with room to spare. The `usbnsh-lcd-wifi` configuration keeps
+the offset and takes the rest of the chip instead, so the region is 3 MB:
 
 ```
 CONFIG_RP23XX_FLASH_MTD_OFFSET=0x100000
-CONFIG_RP23XX_FLASH_MTD_SIZE=0x100000
+CONFIG_RP23XX_FLASH_MTD_SIZE=0x300000
 ```
 
 The driver refuses to initialize if the region would overlap `__flash_binary_end`, so the offset has to stay
 beyond the end of the image, on a 4096 byte erase sector boundary.
 
-Nothing is mounted automatically, apart from XIPFS when `CONFIG_FS_XIPFS` is set. Format and mount on the
+The bringup code mounts nothing, apart from XIPFS when `CONFIG_FS_XIPFS` is set. Format and mount on the
 first boot, then mount without the option afterwards:
 
 ```
@@ -125,9 +133,44 @@ mount -t littlefs -o autoformat /dev/rpflash /mnt
 mount -t littlefs /dev/rpflash /mnt
 ```
 
-`df` then reports 256 blocks of 4096 bytes. Files written to `/mnt` survive `reboot`, a power cycle, and
+`-o` has to come before the paths. `cmd_mount` parses with getopt, which stops at the first argument that is
+not an option, so a trailing `-o autoformat` is read as two more paths and the command fails with "too many
+arguments". The `usbnsh-lcd-wifi` configuration mounts it at boot instead; see the section below.
+
+Changing `CONFIG_RP23XX_FLASH_MTD_SIZE` changes the geometry littlefs expects, so a region formatted at the
+old size no longer mounts. The failure is `EINVAL`, and `autoformat` does not cover it, because that option
+only fires on `EFAULT`. Reformat once with `-o forceformat` after a size change.
+
+`df` then reports 4096 byte blocks, 256 of them at 1 MB and 768 at 3 MB. Files written to `/mnt` survive `reboot`, a power cycle, and
 reflashing the firmware, because the region starts beyond the image. An image that grew past the 1 MB offset
 would collide with it, and the driver refuses to initialize in that case rather than corrupting the data.
+
+### Mounting at Boot
+
+`CONFIG_ETC_ROMFS` and `CONFIG_FS_ROMFS` build the board's `src/etc` directory into a small ROMFS image,
+mount it at `/etc`, and run `etc/init.d/rcS` before the shell starts. The board ships both `rcS` and
+`rc.sysinit` with nothing in them but a license header, so the mounts go in `rcS`, which
+`patches/nuttx/0003-rp23xx-rcS-mount-storage.patch` does:
+
+```
+mount -t tmpfs /tmp
+mount -t littlefs -o autoformat /dev/rpflash /data
+```
+
+The file passes through the C preprocessor, so `#ifdef` guards work and a `#` cannot start a comment. Use
+`/* */` instead. The generated copy lands in `boards/arm/rp23xx/common/etctmp/etc/init.d/rcS`, which is worth
+reading when a line does not do what it should.
+
+After this, `mount` reports four filesystems on a fresh boot:
+
+| Mount   | Type     | Size | Backing                       |
+| ------- | -------- | ---- | ----------------------------- |
+| `/data` | littlefs | 3 MB | internal flash, `/dev/rpflash` |
+| `/tmp`  | tmpfs    | RAM  | grows as it is used           |
+| `/etc`  | romfs    | 384 B | read-only, holds `rcS`       |
+| `/proc` | procfs   | 0 B  | kernel state                  |
+
+A file written to `/data` survives a reset, a power cycle, and a reflash.
 
 ### Shell Editing and History
 
@@ -211,6 +254,113 @@ the radio never works:
 - An unpatched tree makes Kconfig drop `CONFIG_RP23XX_INFINEON_CYW43439` without a word, since the symbol is
   defined only by the patch. The driver still compiles, but nothing registers `wlan0`. The build checks for
   the board symbol whenever the driver symbol is set, and says which command to run.
+
+
+### The 1.3 Inch 240x240 Display
+
+A Waveshare Pico-LCD-1.3, an ST7789 panel with a joystick and four buttons, works over SPI1.
+It seats onto all 40 pins, so nothing needs wiring.
+
+```shell
+make nuttx-distclean
+make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13
+make nuttx-build
+make flash-pico-uf2 UF2=external/nuttx/nuttx.uf2
+```
+
+The image is 348672 bytes. It registers `/dev/fb0` and `/dev/lcd0`, and the `fb` example draws nested coloured
+rectangles on the panel:
+
+```
+nsh> fb
+     xres: 240
+     yres: 240
+      bpp: 16
+    fblen: 115200
+   stride: 480
+Test finished
+```
+
+115200 bytes is 240 by 240 at two bytes per pixel, so the geometry is right.
+
+### Two Things the Tree Was Missing
+
+NuttX has the chip-independent `st7789.c` driver, but the rp23xx board support could not reach it. Both gaps are
+fixed by `patches/nuttx/0002-rp23xx-st7789-lcd.patch`.
+
+`common/src/rp23xx_st7789.c` did not exist, although both `Make.defs` and `CMakeLists.txt` already listed it
+under `CONFIG_LCD_ST7789`. The new file follows `rp23xx_st7735.c`, which is the same pattern already native to
+this chip. Only the backlight pin differs: GP13 here against GP25 on the panel that file was written for.
+
+`common/src/rp23xx_common_bringup.c` registered no display at all. It had no `fb_register()`, no
+`board_lcd_initialize()`, and no `lcddev_register()`, so nothing would ever have called the glue. The patch adds
+those three, guarded by `CONFIG_VIDEO_FB`, `CONFIG_LCD`, and `CONFIG_LCD_DEV`, mirroring
+`rp2040_common_bringup.c`. This is also why `rp23xx_st7735.c` sits in the tree with no board configuration using
+it.
+
+### Pins
+
+The Waveshare wiring matches the rp23xx SPI1 defaults, so no pin options need setting:
+
+| Signal | GPIO | Source |
+| --- | --- | --- |
+| CLK | 10 | `CONFIG_RP23XX_SPI1_SCK_GPIO` |
+| DIN | 11 | `CONFIG_RP23XX_SPI1_TX_GPIO` |
+| CS | 9 | `CONFIG_RP23XX_SPI1_CS_GPIO` |
+| DC | 8 | `CONFIG_RP23XX_SPI1_RX_GPIO` |
+| RST | 12 | `LCD_RST` in the board glue |
+| BL | 13 | `LCD_BL` in the board glue |
+
+D/C reuses the SPI1 RX pad. The panel bus is write-only, so RX is free, and `rp23xx_spi1cmddata()` in
+`common/src/rp23xx_spi.c` already drives `CONFIG_RP23XX_SPI1_RX_GPIO` for exactly this. That option has to stay
+at its default of 8.
+
+### Controls
+
+The panel carries a five way joystick and four keys. They are plain GPIO pads that short to ground, so each pad
+needs its pull-up on and a pressed control reads low. The board configured the pads with no pull-up at all, which
+left an unpressed input floating and reading as noise, so the patch turns them on.
+
+`patches/nuttx/0006-raspberrypi-pico-2-lcd13-buttons.patch` declares the nine controls, fixes the pull-ups, and
+has the board select `ARCH_HAVE_BUTTONS` and `ARCH_HAVE_IRQBUTTONS`. Without those two selects `CONFIG_ARCH_BUTTONS`
+cannot be set at all, since it depends on them. The patch also adds the `nuttx/input/buttons.h` include that
+`rp23xx_bringup.c` was missing: it called `btn_lower_initialize()` without it, which failed the build the first
+time `CONFIG_INPUT_BUTTONS` was enabled on this board.
+
+With `CONFIG_INPUT_BUTTONS` the bringup registers `/dev/buttons`, and a read returns one bit per control.
+
+| Control | GPIO | Bit |
+| --- | --- | --- |
+| Joystick up | 2 | 0 |
+| Joystick down | 18 | 1 |
+| Joystick left | 16 | 2 |
+| Joystick right | 20 | 3 |
+| Joystick press | 3 | 4 |
+| Key A | 15 | 5 |
+| Key B | 17 | 6 |
+| Key X | 19 | 7 |
+| Key Y | 21 | 8 |
+
+None of these clash with the panel, which uses GPIO 8 to 13, or with the wireless chip, which uses 23 to 25 and
+29. The bit order follows the `BUTTON_` definitions in the board's `board.h` rather than the GPIO numbers, so a
+reader that cares about the order has to follow that file.
+
+The mapping was settled by using the controls and watching what they did, not by a clean scan.
+`apps/examples/buttons` reported eight distinct bits for nine presses, and it is a poor tool for the job: it
+stops printing after a handful of samples while its daemon stays alive and goes on consuming the events, so a
+second capture returns nothing. Which of the nine went unreported was never established. If a single control
+misbehaves later, that missing press is the first thing to re-check.
+
+### Stopping a Task
+
+`kill` does not stop a task in these configurations. `CONFIG_SIG_DEFAULT` is off, so there is no default action
+for `SIGKILL` and the target ignores it, `kill -9` included. A long running application needs its own way out.
+The face reads the word `quit` from its state file for exactly this reason.
+
+### Not Done Yet
+
+The panel is 240 pixels wide while NES output is 256 and SNES is 256, so an emulator would have to crop or scale
+horizontally.
 
 ### Cold Boot Is Intermittent
 

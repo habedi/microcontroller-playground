@@ -17,8 +17,18 @@ The 32 MB of PSRAM also works, at up to 200 MHz under ESP-IDF.
 
 ### Silicon Revision
 
-The board is an ESP32-P4-Function-EV-Board v1.5.2 and the chip on it reports revision v1.3. Those are two
-separate things, the printed circuit board and the die, and both numbers belong in a bug report.
+The board is a Waveshare ESP32-P4-WIFI6, and the chip on it reports revision v1.3. Those are two separate
+things, the printed circuit board and the die, and both numbers belong in a bug report.
+
+Earlier versions of this file called the board an ESP32-P4-Function-EV-Board v1.5.2, which is Espressif's own
+reference board. That was wrong. The two are easy to tell apart: this board has one USB-C connector and a 40-pin
+header, no Ethernet, and a Waveshare silkscreen. Several observations confirm it. The board reports 32 MB of
+stacked PSRAM in an ESP32-P4NRW32 and 32 MB of NOR flash, both of which Waveshare lists. `emac_esp32_init` times
+out on every boot because there is no Ethernet PHY to reset, and this board has no Ethernet socket. Only one
+serial device ever appears, never two.
+
+The NuttX configuration is still `esp32p4-function-ev-board`, because that is the only ESP32-P4 board in the
+tree. It works on this hardware, which is worth stating as a finding rather than leaving as a coincidence.
 NuttX supports v3.0 and above, and the stock configuration compiles a revision check that calls `PANIC()` on anything older.
 Two options bypass it:
 
@@ -46,15 +56,14 @@ THIS MAY NOT WORK! DON'T USE THIS CHIP IN PRODUCTION!
 
 ### Serial Port
 
-The board has two USB-C connectors, and both appear as `/dev/ttyACM0`, so the name alone does not say which one
-is in use. Tell them apart by USB vendor:
+The board has one USB-C connector. Waveshare calls it the "Type-C Interface, for power supply, programming, and
+debugging". It goes to an onboard WCH CH343 bridge, which appears as `/dev/ttyACM0` and reports USB vendor
+`1a86`, product `55d3`, named `USB Single Serial`. Check it before flashing, since the Pico 2 also takes the
+`ttyACM` name:
 
 ```shell
 udevadm info -q property -n /dev/ttyACM0 | grep ID_VENDOR_ID
 ```
-
-`303a` is Espressif, meaning the connector wired to the chip's own USB Serial/JTAG controller. `1a86` is
-QinHeng, meaning the onboard WCH CH343 bridge, which reports as `USB Single Serial` with product ID `55d3`.
 
 The CH343 sits on UART0, which ESP-IDF confirms at boot:
 
@@ -62,12 +71,12 @@ The CH343 sits on UART0, which ESP-IDF confirms at boot:
 I (163) cpu_start: GPIO 38 and 37 are used as console UART I/O pins
 ```
 
-Those are the pins the notes below once said needed an external USB to UART adapter. The board already carries
-one, so no extra hardware is required for a UART0 console.
+The board carries the bridge, so no extra hardware is needed for a UART0 console. Flash with
+`make nuttx-flash-esp PORT=/dev/ttyACM0`.
 
-Either connector flashes the chip, because the ROM download mode listens on UART0 as well as on USB
-Serial/JTAG. Flash with `make nuttx-flash-esp PORT=/dev/ttyACM0`. A board with a CP2102 bridge appears as
-`/dev/ttyUSB0` instead.
+The chip's own USB Serial/JTAG controller is not on that connector. The separate 4-pin USB header is a USB OTG
+2.0 High Speed interface, not a console. So an Espressif `303a` device never appears from this board, and every
+serial reading is the bridge.
 
 ### Where the Boot Stops
 
@@ -90,53 +99,6 @@ to `ETS_SYSTIMER_TARGET0_INTR_SOURCE`, the boot tick.
 The `A`, `B`, `C`, and `D` markers come from `showprogress()` in `esp_start.c`, so `__esp_start()` completes
 and `nx_start()` runs. Driver probes show the scheduler tick firing, the console interrupt service routine
 running, and the serial layer toggling its transmit interrupt, so the kernel is alive when output stops.
-
-### Factors That Do Not Affect the Hang
-
-Each of the following is eliminated by a clean rebuild and a flash:
-
-- Brownout detection, whether enabled or disabled.
-- The inverted `is_edge` test at `esp_irq.c:597`, which reads
-  `esprv_int_get_type(cpuint) == INTR_TYPE_LEVEL` where `INTR_TYPE_LEVEL` is 0 and the console attaches as
-  `ESP_IRQ_TRIGGER_LEVEL`. The test still looks wrong, but correcting it changes nothing here.
-- The ROM CLIC patch in `esp_rom_clic.c`. Stubbing out its `CLIC_INT_CTRL_REG` write makes no difference, and
-  the offset in it is correct, since `esp_cpu_intr_set_type` passes the raw CPU interrupt number and the patch
-  adds the CLIC base of 16.
-- Disabling the RWDT and MWDT0 flashboot watchdogs at the top of `__esp_start()`.
-
-### Workarounds to Avoid
-
-Two edits to `external/nuttx` circulate for this board. Neither is needed, and one is harmful.
-
-Adding `PROVIDE(esprv_intc_int_set_type = 0);` to
-`boards/risc-v/esp32p4/common/scripts/esp32p4_aliases.ld` silences this link error:
-
-```
-riscv32-none-elf-ld.bfd: rom.api.ld.tmp:5: undefined symbol `esprv_intc_int_set_type' referenced in expression
-```
-
-It also resolves a live function to address zero. The map file shows the call site in `intr_alloc.o` binding
-to it:
-
-```
-nuttx.map: 0x00000000  PROVIDE (esprv_int_set_type = esprv_intc_int_set_type)
-nuttx.map: esprv_int_set_type   staging/libarch.a(intr_alloc.o)
-nm nuttx:  00000000 A esprv_int_set_type
-```
-
-That link error is a symptom of a stale build rather than a binutils 2.46 problem. `esp_rom_clic.c` is guarded
-by `#if ESP_ROM_CLIC_INT_TYPE_PATCH && CONFIG_ESP32P4_SELECTS_REV_LESS_V3`. Compiled while that option is off,
-the object holds no symbols and the linker falls back to the `PROVIDE`. After a clean rebuild with the option
-set, the object defines the function, the `PROVIDE` never fires, and the link succeeds:
-
-```
-nuttx.map: [!provide]  PROVIDE (esprv_int_set_type = esprv_intc_int_set_type)
-nm nuttx:  40001252 T esprv_int_set_type
-```
-
-The second edit moves the RWDT and MWDT0 flashboot disable to the top of `__esp_start()` in
-`arch/risc-v/src/common/espressif/esp_start.c`. On a correctly built tree it makes no difference: images with
-and without it stop at the same point.
 
 ### Configuration Changes Require a Clean Rebuild
 
@@ -168,6 +130,17 @@ draining. With `CONFIG_DEBUG_*` enabled the board dies before the console is att
 the boot proceed further. The bound is a candidate patch for upstream.
 
 The consequence is that panics, assertions, and syslog produce no output in that configuration.
+
+### Dead Ends on the USB Console Hang
+
+None of these changes anything: brownout detection either way, the inverted `is_edge` test at `esp_irq.c:597`,
+the ROM CLIC patch in `esp_rom_clic.c`, or disabling the RWDT and MWDT0 flashboot watchdogs early in
+`__esp_start()`.
+
+Do not add `PROVIDE(esprv_intc_int_set_type = 0);` to `esp32p4_aliases.ld`. It silences an undefined-symbol link
+error by resolving a live function to address zero. That error is a stale-build symptom: `esp_rom_clic.c` is
+guarded by `ESP_ROM_CLIC_INT_TYPE_PATCH && CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, so an object compiled with the
+option off holds no symbols. A clean rebuild with it on fixes the link properly.
 
 ### PSRAM Works
 
@@ -203,11 +176,6 @@ An earlier version of these notes said PSRAM power runs through LDO channel 3 at
 report. That was wrong. ESP-IDF puts PSRAM on channel 2 at 1.8 V, declared `range 2 2` with 1800 mV as the
 only voltage, and `ESP_LDO_RESERVE_PSRAM` defaults to enabled, so nothing needs configuring. Channel 3 at
 2.5 V is the MIPI DSI PHY supply, which is a different peripheral.
-
-### The Revision Needs an Explicit Switch Everywhere
-
-Two independent projects require one for this silicon, `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` in NuttX and
-`engineering_sample: true` in ESPHome, which is a fair measure of how much the revision matters.
 
 ### ESP-IDF Runs on This Board
 
@@ -480,177 +448,42 @@ The C6 ships with slave firmware v0.0.6, which Espressif recommends upgrading. R
 to UART adapter on the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the
 P4 held in its bootloader. The over-the-air route needs a working link and so cannot bootstrap from here.
 
-### Reflashing the C6 Needs the Header
-
-Three host generations of ESP-Hosted fail identically at SDIO enumeration, 1.4.7, 2.7.4, and 3.0.6, so host
-software version is not the cause. See [../experiments/espidf-wifi](../experiments/espidf-wifi).
-
-A cable-free route looked possible, because Espressif's `esp-serial-flasher` supports SDIO with the C6 as a
-target and talks to the ROM loader rather than to slave firmware. It does not work here.
-[../experiments/espidf-c6flash](../experiments/espidf-c6flash) has the detail: forcing download mode needs the
-C6's bootstrap, and no ESP32-P4 GPIO on this board is documented as reaching it. The library's example uses
-GPIO53 for that purpose on another board, and on this board GPIO53 drives I2S audio, so the attempt proved
-nothing.
-
-That leaves the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the P4
-held in its bootloader. The over-the-air route through ESP-Hosted needs a working link and cannot bootstrap
-from a broken one.
-
 ### CPython Builds but Does Not Run
 
-The board has a stock `python` configuration, and it produces real CPython 3.13.0 with pip rather than
-MicroPython. It builds and the image boots. The interpreter does not run.
+The stock `python` configuration produces real CPython 3.13.0 with pip. It builds, and the 15 MB image boots with
+`python` among the builtin apps. Running it faults.
 
-The configuration depends on the PSRAM: it sets `ESPRESSIF_SPIRAM`, moves BSS to external memory with
-`SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`, and places a 2 MB filesystem heap there. It declares 16 MB of flash with
-the application occupying 0x002000 to 0xFCA000, about 15.8 MB, because the standard library is linked into the
-image as a 5.92 MiB `python313.zip` rather than placed on the filesystem. `PYTHONPATH` is `/data`, which is only
-216 KB here and is meant for your own scripts.
+The cause is the thread pointer. CPython keeps interpreter state in `__thread` variables. Debug assertions show a
+load from address zero in `_PyThreadState_Attach`, and the register dump shows `TP: 00000000`. NuttX sets the
+RISC-V thread pointer only when `CONFIG_SCHED_THREAD_LOCAL` is enabled, at `riscv_initialstate.c:122`.
 
-The image is 15058088 bytes, takes about three and a half minutes to flash, and boots reporting three heaps:
+Enabling that option does not link: `riscv_tls.c` needs `_stdata`, `_etdata`, and `_etbss`, and no ESP32-P4
+linker script defines them. 42 board scripts elsewhere in the tree do. Adding `.tdata` and `.tbss` sections to
+`esp32p4_sections.ld` is the remaining work.
 
-```
-nsh> free
-      total       used       free    maxused    maxfree  nused  nfree name
-    2097148       2020    2095128       2400    2095128     25      1 heapfs
-     316068      11332     304736      41600     190432     56      6 Kmem
-   31296252       5500   31290752       7416   31289216      8      2 Umem
-```
+Three fixes were needed to link at all, kept in `patches/nuttx-apps/0001-python-cross-build-fixes.patch`. The
+host interpreter was built with the cross compiler, because the port's host rule does not override `CC`.
+`_posixsubprocess` cannot compile without fork, since CPython gates its vfork path on `defined(__linux__)`.
+Thread-local storage needed `-ftls-model=local-exec`, which took 567 `R_RISCV_TLS_GOT_HI20` relocations to zero.
 
-`python` appears among the builtin apps. Running it hangs the board. `python &` shows the task created as
-`python [7:100]` and the shell returns its prompt, so the 512 KB stack allocates successfully, which means it
-comes from the 31 MB user heap in PSRAM rather than the 316 KB kernel heap. From the moment the task runs the
-system produces nothing: ten liveness probes over ten minutes returned zero bytes and the console does not
-even echo. A reset always recovers the board.
+The host half of the build also needs four things from `flake.nix`: autoconf, automake and libtool for libffi's
+`autoreconf`; `ACLOCAL_PATH` for libtool's macros; zlib and friends, without which the host interpreter has no
+zlib module and pip cannot unpack its own wheel; and `hardeningDisable = [ "all" ]`.
 
-Ruled out along the way: stack allocation, which succeeds; argument handling, since bare `python` behaves
-identically; and scheduler starvation, since `CONFIG_RR_INTERVAL` is 200, so time slicing is active and an
-equal-priority task cannot lock out the shell.
-
-### The Cause Is the Thread Pointer
-
-Debug assertions turn the silence into an answer:
-
-```
-check_and_mount_romfs: Mounting ROMFS filesystem at target=/usr/local/lib with source=/dev/ram1
-riscv_exception: EXCEPTION: Load access fault. MCAUSE: 00000005, EPC: 4005c318, MTVAL: 00000000
-riscv_fault_handler: PANIC!!! Exception = 00000005
-task: python
-```
-
-`MTVAL` is the faulting address, so this is a load from zero, and the EPC resolves to `_PyThreadState_Attach`.
-The register dump shows why: `TP: 00000000`. The RISC-V thread pointer is never set, so every thread-local read
-lands near address zero.
-
-CPython keeps its per-thread interpreter state in `__thread` variables, and NuttX sets the thread pointer only
-when `CONFIG_SCHED_THREAD_LOCAL` is enabled, at `riscv_initialstate.c:122`:
-
-```c
-__asm__ __volatile__("mv tp, %0" : : "r"(tcb));
-```
-
-That option is absent from the stock `python` configuration. It requires `ARCH_HAVE_THREAD_LOCAL`, which RISC-V
-does select, and a toolchain that supports `__thread`, which the dev shell's compiler does.
-
-So the TLS model and the kernel option are a matched pair, and either alone is broken. Initial-exec TLS cannot
-link, because it resolves through a GOT that `esp32p4_sections.ld` has nowhere to place. Local-exec TLS links but
-cannot run without `CONFIG_SCHED_THREAD_LOCAL`, because it computes addresses from a thread pointer that stays
-zero. A configuration enabling CPython on RISC-V needs both.
-
-### The Blocker Is the Board's Linker Script
-
-Enabling `CONFIG_SCHED_THREAD_LOCAL` does not link:
-
-```
-riscv_tls.c: undefined reference to `_stdata'
-riscv_tls.c: undefined reference to `_etdata'
-riscv_tls.c: undefined reference to `_etbss'
-```
-
-`up_tls_size()` and `up_tls_initialize()` need symbols marking the bounds of the thread-local data and BSS
-sections, and none of the ESP32-P4 linker scripts define `_stdata`, `_etdata`, `_stbss`, or `_etbss`. So the
-board support has no thread-local storage support at all.
-
-This is not an exotic requirement. 42 board scripts elsewhere in the tree define these symbols, so the pattern is
-established and the fix is to place `.tdata` and `.tbss` output sections in `esp32p4_sections.ld` with the
-matching symbols. That is a change to board support rather than to a configuration, and it is the one remaining
-thing standing between this board and a working CPython.
-
-The full chain, for anyone picking this up: CPython needs `__thread`; `__thread` needs the thread pointer, which
-needs `CONFIG_SCHED_THREAD_LOCAL`; that option needs `riscv_tls.c` to link, which needs TLS section symbols the
-ESP32-P4 linker script does not provide.
-
-### Getting Diagnostics Cost Three Attempts
-
-Worth recording, because the obstacles were unrelated to Python.
-
-An incremental rebuild after enabling `CONFIG_DEBUG_*` produced an image that would not boot at all. That is the
-stale Espressif HAL object trap this file already describes, and deleting the 245 objects under
-`arch/risc-v/src/chip/esp-hal-3rdparty` forces the recompile without a `distclean`, which matters because
-`distclean` reaches into `nuttx-apps` and would destroy the multi-hour CPython build.
-
-With assertions active, the board then died during bring-up rather than reaching a prompt. The Ethernet MAC times
-out because nothing is connected, and its error path trips an assertion:
-
-```
-E (1743) esp.emac: emac_esp32_init(535): reset timeout
-dump_assert_info: Assertion failed ... semcount < 0: at file: semaphore/sem_recover.c:121 task: AppBringUp
-```
-
-Without assertions this is the benign-looking `board_emac_init failed: -5` on every boot of this configuration.
-It is a real defect in a failure path, worth reporting, and it hides until assertions are on. Setting
-`CONFIG_ESPRESSIF_EMAC=n` avoids it. Disabling `CONFIG_NET_ETHERNET` as well does not build, because
-`icmp_ioctl.c` needs a link layer present.
-
-### Two Warnings From the Same Boot
-
-The Espressif flash driver reports that this chip model has no support for access beyond 16 MB:
-
-```
-W: Detected flash size > 16 MB, but access beyond 16 MB is not supported for this flash model yet
-```
-
-That bears on `nsh-full-32m-rev1`, which declares 32 MB and puts a 30 MB littlefs on it. That configuration
-passes `fstest` and survived a 16 MB write, so it works in practice, but the driver does not claim to support it.
-
-The driver also reports using a generic flash driver for a GigaDevice chip and suggests
-`SPI_FLASH_SUPPORT_GD_CHIP`, which is untested here.
-
-### Three Fixes the CPython Port Needs
-
-Getting it to link took three changes, kept in `patches/nuttx-apps/0001-python-cross-build-fixes.patch`. Each is
-reproducible on any NuttX RISC-V target without fork rather than specific to this board.
-
-The host interpreter was built with the cross compiler. The port builds CPython twice, once for the host as a
-cross-compilation helper, and its host rule runs `configure` without overriding `CC`, so it inherits the target
-compiler and fails with "cannot run C compiled programs". The fix clears the toolchain variables for that one
-invocation.
-
-`_posixsubprocess` cannot compile without fork. The port disables it only when both fork and vfork are absent,
-reasoning that vfork suffices. CPython gates its vfork path on `defined(__linux__)`, so on NuttX it is never
-selected and the module falls back to `fork()`. `ARCH_HAVE_FORK` depends on `ARCH_ADDRENV`, which needs
-MMU-backed address environments this chip lacks, so the module can never build here. The fix keys the decision on
-real fork alone, at the cost of Python's `subprocess` module.
-
-Thread-local storage used the initial-exec model, which resolves through a GOT, so the linker synthesised a
-`.got.plt` section that `esp32p4_sections.ld` cannot place and the link failed with "discarded output section:
-`.got.plt`". libpython carried 567 `R_RISCV_TLS_GOT_HI20` relocations where no NuttX library carried any. Adding
-`-ftls-model=local-exec` takes that to zero and is the correct model for a single-address-space image.
-
-### Building CPython Needs More From the Dev Shell
-
-Four additions to `flake.nix`, all for the host half of the build rather than the target. autoconf, automake, and
-libtool, since libffi runs `autoreconf`. `ACLOCAL_PATH` pointing at libtool's macros, without which aclocal
-reports "Libtool library used but LIBTOOL is undefined". A `hostPythonDeps` list of zlib, openssl, bzip2, xz,
-sqlite, and libffi, without which the host interpreter has no zlib module and the bundled pip cannot unpack its
-own wheel. And `hardeningDisable = [ "all" ]`, because Nix adds `-Werror=format-security`, which collides with
-the port's `-Wno-format`, along with `relro` and `bindnow`, which make the linker discard `.got.plt`.
+Two notes from the same boot. The Ethernet MAC error path trips an assertion in `sem_recover.c:121` when
+`emac_esp32_init` times out, which is the benign-looking `board_emac_init failed: -5` seen on every boot. And the
+flash driver reports that access beyond 16 MB is unsupported on this chip, which bears on the 30 MB filesystem
+configuration: it passes `fstest` and a 16 MB write, but the driver does not claim to support it.
 
 ### Next Step
 
-Flash the C6 with current slave firmware once a USB to UART adapter is available. That is the one blocker
-between this board and working Wi-Fi and Bluetooth. Read the C6's console first, since silence and a boot log
-point at different faults.
+Reaching the C6 needs a soldered connection to the "ESP32-C6 UART Pads", since this board has no programming
+header. Read its console before writing anything: silence and a boot log point at different faults.
+
+Two hypotheses are already dead. The SDIO pins are not wrong, because Waveshare's own Wi-Fi example sets no pin
+options and relies on the same component defaults we used. The host version pairing is not wrong either, because
+Waveshare pins `esp_hosted 1.4.*` with `esp_wifi_remote 0.14.*` and that combination fails here identically to
+2.7.4 and 3.0.6. What remains is the firmware on the C6, or a fault in the part or its wiring.
 
 Several defects are worth reporting upstream. None is in the silicon.
 

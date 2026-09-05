@@ -18,14 +18,14 @@ Priorities, in order:
 
 The boards connect over USB to a Linux development machine, on either amd64 or arm64.
 
-- ESP32-P4 development board with 32 MB of PSRAM and headers. The ESP32-P4 is a dual-core RISC-V application processor with no radio. The board
-  pairs it with an onboard ESP32-C6, which acts as a wireless coprocessor and provides Wi-Fi 6 and Bluetooth LE. This sample is silicon revision
-  v1.3, below the v3.0 that NuttX supports, so it needs `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and
-  `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. With those set it reaches a NuttShell prompt when the console is on UART0, and it also
-  runs ESP-IDF. Only the USB Serial/JTAG console is broken, so use the UART one. It has two USB-C connectors: one goes to the chip's
-  own USB Serial/JTAG controller, and the other goes to an onboard WCH CH343 bridge on UART0, meaning GPIO37 and GPIO38. Both enumerate as
-  `/dev/ttyACM0`, so identify them by USB vendor, `303a` for Espressif and `1a86` for the bridge. The bridge gives a UART0 console with no extra
-  hardware.
+- Waveshare ESP32-P4-WIFI6, an ESP32-P4NRW32 with 32 MB of stacked PSRAM, 32 MB of NOR flash, and a 40-pin header. The ESP32-P4 is a dual-core
+  RISC-V application processor with no radio. The board pairs it with an onboard ESP32-C6-MINI-1 over SDIO, which is meant to provide Wi-Fi 6 and
+  Bluetooth 5. That link does not work; see `docs/esp32p4.md`. This sample is silicon revision v1.3, below the v3.0 that NuttX supports, so it needs
+  `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100` to get past the revision check. With those set it reaches a NuttShell prompt
+  when the console is on UART0, and it also runs ESP-IDF. One USB-C connector, going to an onboard WCH CH343 bridge on UART0, meaning GPIO37 and
+  GPIO38. It appears as `/dev/ttyACM0` with USB vendor `1a86`, and the Pico 2 takes the same device name, so check the vendor before flashing. The
+  board has no Ethernet, so the boot always reports an EMAC timeout. The NuttX board is `esp32p4-function-ev-board`, which is Espressif's reference
+  board and the only ESP32-P4 in the tree; it works here.
 - Raspberry Pi Pico 2 WH: an RP2350 board with headers and a wireless module. The RP2350 has both Arm Cortex-M33 and RISC-V Hazard3 cores. The
   NuttX port targets the Cortex-M33 cores. The NuttX board is `raspberrypi-pico-2`, since the tree has no `-w` variant, and it runs correctly on the
   WH with the wireless module unused. The `usbnsh` configuration gives a NuttShell over the USB cable, which makes this the board that currently
@@ -133,6 +133,11 @@ Flashing depends on the chip family:
 
 Reach the serial console with `picocom` (for example `picocom -b 115200 /dev/ttyACM0`). Serial access needs membership in the `dialout` group on most
 Linux distributions (some use `uucp` instead).
+
+The port takes one reader at a time, and a terminal holding it makes every other attempt look like a hung board. `tools/board-mcp.py` is an MCP server that
+owns the port, waits for the prompt rather than sleeping a fixed time, and names the process holding the port when it cannot open it. It also strips MAC
+addresses and wireless scan details on the way out, so the Privacy rules below hold without depending on judgment. Prefer it over a one-off serial script.
+See `docs/board-mcp.md`.
 
 ## Toolchains
 
