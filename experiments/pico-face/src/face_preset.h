@@ -19,8 +19,8 @@
  ****************************************************************************/
 
 /* A renderer gets the pose, and also the state and the clock, so a preset
- * that wants to key an animation off either can.  The current three take
- * everything from the pose and ignore both.
+ * that wants to key an animation off either can.  The penguin sways on the
+ * clock; the others take everything from the pose.
  */
 
 typedef void (*face_render_fn)(const struct face_surface *s,
@@ -53,6 +53,11 @@ void face_render_crab(const struct face_surface *s,
                       const struct face_pose *pose,
                       enum face_state state, uint32_t now_ms, int palette,
                       struct face_dirty *dirty);
+
+void face_render_penguin(const struct face_surface *s,
+                         const struct face_pose *pose,
+                         enum face_state state, uint32_t now_ms, int palette,
+                         struct face_dirty *dirty);
 
 /* How many presets there are, and one of them by index.  An index outside
  * the table wraps, so the caller can add or subtract one without checking.

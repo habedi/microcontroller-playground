@@ -323,6 +323,76 @@ static void test_crab_is_angrier_than_the_pose(void)
   check(inner > outer, "a resting crab lowers its inner brow ends");
 }
 
+/* The penguin's beak opens with the mouth: an open one shows its dark inside
+ * and a shut one shows none.
+ */
+
+static int count_colour(uint16_t colour)
+{
+  int n = 0;
+  int i;
+
+  for (i = 0; i < PANEL * PANEL; i++)
+    {
+      n += g_pixels[i] == colour;
+    }
+
+  return n;
+}
+
+static void test_penguin_beak_opens(void)
+{
+  struct face_surface surf = panel();
+  struct face_dirty dirty;
+  struct face_pose p;
+  uint16_t inside;
+  int shut;
+  int open;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+  p.mouth_open = FACE_UNIT;
+  face_render_penguin(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+
+  /* The inside colour is read back from the middle of the open beak, cell
+   * 21 by 23, so the test does not have to know the penguin's palette.
+   */
+
+  inside = g_pixels[(size_t)CRAB(23) * PANEL + (size_t)CRAB(21)];
+  open = count_colour(inside);
+
+  p.mouth_open = 0;
+  face_render_penguin(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  shut = count_colour(inside);
+
+  check(open > 0, "an open beak shows its inside");
+  check(shut == 0, "a shut beak shows none of it");
+}
+
+/* The sway comes from the clock, so the same pose at two moments a quarter
+ * of a sway apart draws two different frames.
+ */
+
+static void test_penguin_sways(void)
+{
+  struct face_surface surf = panel();
+  static uint16_t earlier[PANEL * PANEL];
+  struct face_dirty dirty;
+  struct face_pose p;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+
+  face_render_penguin(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  memcpy(earlier, g_pixels, sizeof(earlier));
+  face_render_penguin(&surf, &p, FACE_IDLE, 600, 0, &dirty);
+
+  check(memcmp(earlier, g_pixels, sizeof(earlier)) != 0,
+        "the penguin moves between two moments of the sway");
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -337,6 +407,8 @@ int main(void)
   test_pixel_brow_tilts_the_right_way();
   test_crab_smile_points_the_right_way();
   test_crab_is_angrier_than_the_pose();
+  test_penguin_beak_opens();
+  test_penguin_sways();
 
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

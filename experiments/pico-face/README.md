@@ -11,7 +11,7 @@ OS: Apache NuttX, configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wif
 ### Status
 
 Working. The host tests pass, the image builds, and the face runs on the panel
-with all six expressions reachable in any of three presets, which the panel's
+with all six expressions reachable in any of four presets, which the panel's
 own joystick moves between.
 
 Measured on the board with `face -b`, which times the parts of a frame
@@ -63,8 +63,9 @@ most of it is testable on the host:
   expressions is interpolation. It knows nothing about NuttX.
 - `src/face_preset.c` holds the table of looks. A preset is a name and a
   render function, and `face_render.c` is simply the first row in it.
-  `face_pixel.c` and `face_crab.c` are the other two, drawn from shapes on a
-  coarse grid with the grid drawing and the palettes in `face_sprite.c`.
+  `face_pixel.c`, `face_crab.c`, and `face_penguin.c` are the others, drawn
+  from shapes on a coarse grid with the grid drawing and the palettes in
+  `face_sprite.c`.
 - `src/face_input.c` turns a button mask into an action. It is a pure function
   of the current and previous masks, with no board code, so the edge detection
   is tested on the host.
@@ -208,14 +209,19 @@ without knowing anything about it.
 | `vector` | The original amber face, drawn from shapes. |
 | `pixel` | A pixel portrait bust on a 48 by 48 grid, five panel pixels per art pixel. |
 | `crab` | An angry crab whose shell is its face, after the well known drawing, on a 40 by 40 grid. |
+| `penguin` | A round penguin in a horned helmet and a bow tie, on the same grid. |
 
-All three take their whole shape from `struct face_pose`, so blinks, pupil
-drift, and brow tilt work everywhere. The crab adds a bias of its own: its
-brows sit lower than the pose asks, so it is grumpy at rest and furious on
-`failed`, where a frown also opens its mouth into a shout with teeth and
-lifts its claws. It keeps its own orange rather than using the palettes,
-because a purple crab is not the crab in the drawing. The pixel portrait
-follows the palette the B button picks.
+All four take their shape from `struct face_pose`, so blinks and pupil
+drift work everywhere. The crab adds a bias of its own: its brows sit lower
+than the pose asks, so it is grumpy at rest and furious on `failed`, where a
+frown also opens its mouth into a shout with teeth and lifts its claws. The
+penguin has no brows, so the helmet stands in: it slides down over the eyes
+when the brows lower and lifts when they rise, the beak opens with the
+mouth, and the whole bird sways on a slow waddle driven by the clock, which
+is the one motion here that does not come from the pose. The crab and the
+penguin keep their own colours rather than using the palettes, because a
+purple crab is not the crab in the drawing. The pixel portrait follows the
+palette the B button picks.
 
 An earlier third preset was a 32 by 32 character sprite with one hand drawn
 pose per expression. It was dropped because the art did not read at this

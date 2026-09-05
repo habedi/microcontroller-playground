@@ -17,6 +17,7 @@ static const struct face_preset g_presets[] =
   { "vector", face_render },
   { "pixel",  face_render_pixel },
   { "crab",   face_render_crab },
+  { "penguin", face_render_penguin },
 };
 
 #define NPRESETS ((int)(sizeof(g_presets) / sizeof(g_presets[0])))

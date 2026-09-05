@@ -17,7 +17,7 @@ preview: $(BUILD)/preview
 	@echo "wrote $(BUILD)/faces.png"
 
 SRCS = $(SRC)/face.c $(SRC)/face_render.c $(SRC)/face_sprite.c \
-       $(SRC)/face_pixel.c $(SRC)/face_crab.c \
+       $(SRC)/face_pixel.c $(SRC)/face_crab.c $(SRC)/face_penguin.c \
        $(SRC)/face_preset.c
 
 $(BUILD)/preview: preview.c $(SRCS) | $(BUILD)
