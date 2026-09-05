@@ -311,6 +311,78 @@ static void test_smile_points_the_right_way(void)
 }
 
 
+/* A lowered brow has to drop its inner end below its outer end, and a raised
+ * one has to lift it, or a frown and surprise are the same bar at different
+ * heights.  The inner end is the one nearer the middle of the face.
+ */
+
+static int first_lit_row(const uint16_t *buf, int w, int x, int y0, int y1,
+                         uint16_t bg)
+{
+  int y;
+
+  for (y = y0; y < y1; y++)
+    {
+      if (buf[(size_t)y * (size_t)w + (size_t)x] != bg)
+        {
+          return y;
+        }
+    }
+
+  return -1;
+}
+
+static void test_brow_tilts_the_right_way(void)
+{
+  const int w = 240;
+  const int h = 240;
+  uint16_t *buf = malloc((size_t)w * (size_t)h * sizeof(uint16_t));
+  struct face_surface s;
+  struct face_dirty d;
+  struct face_pose p;
+  uint16_t bg;
+  int outer;
+  int inner;
+
+  check(buf != NULL, "allocation");
+  if (buf == NULL)
+    {
+      return;
+    }
+
+  s.pixels = buf;
+  s.width = w;
+  s.height = h;
+  s.stride_px = w;
+
+  /* The left eye is centred at 32 percent of the width and the brow is 24
+   * percent wide, so these two columns are near its outer and inner ends.
+   * Rows 0 to 63 hold nothing but the brows.
+   */
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+  p.glow = 400;
+
+  p.brow = -FACE_UNIT;
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
+  bg = buf[0];
+  outer = first_lit_row(buf, w, 56, 0, 64, bg);
+  inner = first_lit_row(buf, w, 96, 0, 64, bg);
+  check(outer > 0 && inner > 0, "a lowered brow drew both ends");
+  check(inner > outer, "a lowered brow drops its inner end");
+
+  p.brow = FACE_UNIT;
+  face_render(&s, &p, FACE_IDLE, 0, 0, &d);
+  outer = first_lit_row(buf, w, 56, 0, 64, bg);
+  inner = first_lit_row(buf, w, 96, 0, 64, bg);
+  check(outer > 0 && inner > 0, "a raised brow drew both ends");
+  check(inner < outer, "a raised brow lifts its inner end");
+
+  free(buf);
+}
+
 /* Moving the pupil must not change which pixels are lit, only their colour.
  * The pupil rides inside the eye, so if it ever spills past the lid it lights
  * background pixels and reads as a dark blob hanging off the eye.
@@ -410,6 +482,7 @@ int main(void)
   test_blink_changes_the_picture();
   test_eyes_are_widest_in_the_middle();
   test_smile_points_the_right_way();
+  test_brow_tilts_the_right_way();
   test_pupil_stays_inside_the_eye();
 
   printf("%d checks, %d failures\n", g_checks, g_failures);

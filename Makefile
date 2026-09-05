@@ -156,6 +156,12 @@ test-hooks: ## Run the Git hooks on all files
 	uv run pre-commit run --all-files --hook-stage pre-push
 
 # NuttX. A second OS gets its own prefixed group (zephyr-build, and so on).
+#
+# The patches in a set stack: a later one may edit lines an earlier one added,
+# so the earlier one no longer reverses on its own once the later one is on.
+# A patch that applies in neither direction is therefore taken as applied when
+# every file it touches is already modified or added in the tree. The reverse
+# check is still tried first, since it is the stricter answer when it works.
 .PHONY: nuttx-patch
 nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 	@for set in $(PATCH_SETS); do \
@@ -169,19 +175,33 @@ nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 			     2>/dev/null; then \
 				echo "already applied $$p"; \
 			else \
-				echo "ERROR: $$p does not apply cleanly to $$dir"; \
-				echo "Run make nuttx-repatch to reset the patch state."; \
-				exit 1; \
+				touched=1; \
+				for f in $$(sed -n 's|^+++ b/||p' "$$p"); do \
+					if git -C $$dir ls-files --error-unmatch "$$f" \
+					     >/dev/null 2>&1; then \
+						git -C $$dir diff --quiet -- "$$f" && touched=0; \
+					else \
+						test -f $$dir/$$f || touched=0; \
+					fi; \
+				done; \
+				if [ $$touched = 1 ]; then \
+					echo "already applied $$p (under a later patch)"; \
+				else \
+					echo "ERROR: $$p does not apply cleanly to $$dir"; \
+					echo "Run make nuttx-repatch to reset the patch state."; \
+					exit 1; \
+				fi; \
 			fi; \
 		done; \
 	done
 
+# Reverted last to first, since a later patch may sit on top of an earlier one.
 .PHONY: nuttx-unpatch
 nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
 	@for set in $(PATCH_SETS); do \
 		dir=$${set%%:*}; pdir=$${set#*:}; \
 		test -d "$$pdir" || continue; \
-		for p in $$pdir/*.patch; do \
+		for p in $$(ls -r $$pdir/*.patch 2>/dev/null); do \
 			test -f "$$p" || continue; \
 			git -C $$dir apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
 				echo "reverted $$p" || echo "not applied $$p"; \

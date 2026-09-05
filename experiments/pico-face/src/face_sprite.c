@@ -1,7 +1,7 @@
 /****************************************************************************
  * experiments/pico-face/src/face_sprite.c
  *
- * Palettes and the scaled blit shared by the two pixel art presets.
+ * Palettes and the grid drawing shared by the pixel art presets.
  *
  ****************************************************************************/
 
@@ -31,7 +31,7 @@
 static const struct face_palette g_palettes[FACE_NPALETTES] =
 {
   {
-    "hero",
+    "day",
     {
       RGB(10, 9, 14),      RGB(24, 20, 28),     RGB(255, 214, 170),
       RGB(232, 180, 136),  RGB(188, 132, 96),   RGB(250, 200, 90),
@@ -68,21 +68,6 @@ static const struct face_palette g_palettes[FACE_NPALETTES] =
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
-int face_sprite_index(char c)
-{
-  if (c >= '0' && c <= '9')
-    {
-      return c - '0';
-    }
-
-  if (c >= 'a' && c <= 'f')
-    {
-      return 10 + (c - 'a');
-    }
-
-  return -1;
-}
 
 uint16_t face_rgb565(int r, int g, int b)
 {
@@ -145,25 +130,63 @@ void face_sprite_block(const struct face_surface *s, int px, int py,
     }
 }
 
-void face_sprite_blit(const struct face_surface *s,
-                      const struct face_sprite *spr,
-                      const struct face_palette *pal,
-                      int ox, int oy, int scale)
+void face_grid_rect(const struct face_surface *s, int grid, int scale,
+                    int x0, int y0, int w, int h, uint16_t colour)
 {
-  int px;
-  int py;
+  int x;
+  int y;
 
-  for (py = 0; py < spr->h; py++)
+  for (y = y0; y < y0 + h; y++)
     {
-      const char *row = spr->rows[py];
-
-      for (px = 0; px < spr->w; px++)
+      if (y < 0 || y >= grid)
         {
-          int idx = face_sprite_index(row[px]);
+          continue;
+        }
 
-          if (idx >= 0)
+      for (x = x0; x < x0 + w; x++)
+        {
+          if (x >= 0 && x < grid)
             {
-              face_sprite_block(s, px, py, scale, ox, oy, pal->colour[idx]);
+              face_sprite_block(s, x, y, scale, 0, 0, colour);
+            }
+        }
+    }
+}
+
+void face_grid_ellipse(const struct face_surface *s, int grid, int scale,
+                       int cx, int cy, int rx, int ry, uint16_t colour)
+{
+  int x;
+  int y;
+
+  if (rx <= 0 || ry <= 0)
+    {
+      return;
+    }
+
+  for (y = cy - ry; y <= cy + ry; y++)
+    {
+      int dy = y - cy;
+
+      if (y < 0 || y >= grid)
+        {
+          continue;
+        }
+
+      for (x = cx - rx; x <= cx + rx; x++)
+        {
+          int dx = x - cx;
+
+          if (x < 0 || x >= grid)
+            {
+              continue;
+            }
+
+          /* dx^2 / rx^2 + dy^2 / ry^2 <= 1, multiplied out to stay whole. */
+
+          if (dx * dx * ry * ry + dy * dy * rx * rx <= rx * rx * ry * ry)
+            {
+              face_sprite_block(s, x, y, scale, 0, 0, colour);
             }
         }
     }

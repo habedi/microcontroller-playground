@@ -1,13 +1,11 @@
 /****************************************************************************
  * experiments/pico-face/src/face_sprite.h
  *
- * Indexed sprites written as ASCII art, plus the palettes they draw with and
- * the scaled blit that puts them on a surface.  Nothing here touches a
+ * The palettes and the coarse grid drawing the pixel art presets share.  A
+ * preset picks a grid, 48 or 40 cells across, and every shape it draws is
+ * blown up to the panel one whole block per cell, so edges land on block
+ * boundaries and the result reads as pixel art.  Nothing here touches a
  * framebuffer or NuttX, so it builds and runs on the host under test/.
- *
- * A row is one string, one character per pixel.  A dot is transparent and
- * the digits 0 to 9 and the letters a to f select a palette entry, so the
- * art stays readable and editable in a text editor.
  *
  ****************************************************************************/
 
@@ -32,13 +30,6 @@
  * Public Types
  ****************************************************************************/
 
-struct face_sprite
-{
-  int w;                     /* every row must be exactly this long */
-  int h;                     /* number of rows */
-  const char *const *rows;
-};
-
 struct face_palette
 {
   const char *name;
@@ -49,20 +40,13 @@ struct face_palette
  * Public Function Prototypes
  ****************************************************************************/
 
-/* Palette index for one art character, or -1 when the pixel is transparent.
- * Any character that is not a dot and not a hex digit is also transparent,
- * which keeps a typo in the art from drawing a wrong colour silently.
- */
-
-int face_sprite_index(char c);
-
 /* Packs eight bit channels into RGB565.  Shared with the renderers so the
  * palettes and the drawn shapes cannot disagree about a colour.
  */
 
 uint16_t face_rgb565(int r, int g, int b);
 
-/* Fills one scale by scale block at sprite coordinates px, py, offset to
+/* Fills one scale by scale block at grid coordinates px, py, offset to
  * ox, oy on the surface.  Clipped, so a block that falls off the panel is
  * trimmed rather than wrapping.
  */
@@ -70,12 +54,18 @@ uint16_t face_rgb565(int r, int g, int b);
 void face_sprite_block(const struct face_surface *s, int px, int py,
                        int scale, int ox, int oy, uint16_t colour);
 
-/* Draws a sprite at ox, oy, scaled by an integer factor. */
+/* A filled rectangle in grid coordinates, clipped to a grid by grid area. */
 
-void face_sprite_blit(const struct face_surface *s,
-                      const struct face_sprite *spr,
-                      const struct face_palette *pal,
-                      int ox, int oy, int scale);
+void face_grid_rect(const struct face_surface *s, int grid, int scale,
+                    int x0, int y0, int w, int h, uint16_t colour);
+
+/* A filled ellipse in grid coordinates, centred on cx, cy.  Integer only,
+ * so the boundary is a squared distance test and the result is blocky on
+ * purpose.
+ */
+
+void face_grid_ellipse(const struct face_surface *s, int grid, int scale,
+                       int cx, int cy, int rx, int ry, uint16_t colour);
 
 /* Fills the whole surface with one colour. */
 

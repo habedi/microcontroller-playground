@@ -18,9 +18,9 @@
  * Public Types
  ****************************************************************************/
 
-/* A renderer gets the pose, and also the state and the clock, because a
- * sprite preset picks its frame from those two rather than from the pose.
- * The vector preset ignores both.
+/* A renderer gets the pose, and also the state and the clock, so a preset
+ * that wants to key an animation off either can.  The current three take
+ * everything from the pose and ignore both.
  */
 
 typedef void (*face_render_fn)(const struct face_surface *s,
@@ -49,7 +49,7 @@ void face_render_pixel(const struct face_surface *s,
                        enum face_state state, uint32_t now_ms, int palette,
                        struct face_dirty *dirty);
 
-void face_render_hero(const struct face_surface *s,
+void face_render_crab(const struct face_surface *s,
                       const struct face_pose *pose,
                       enum face_state state, uint32_t now_ms, int palette,
                       struct face_dirty *dirty);

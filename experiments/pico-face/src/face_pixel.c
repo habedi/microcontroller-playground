@@ -58,75 +58,6 @@ static int clampi(int v, int lo, int hi)
   return v;
 }
 
-/* A filled rectangle in art coordinates. */
-
-static void px_rect(const struct face_surface *s, int scale,
-                    int x0, int y0, int w, int h, uint16_t colour)
-{
-  int x;
-  int y;
-
-  for (y = y0; y < y0 + h; y++)
-    {
-      if (y < 0 || y >= GRID)
-        {
-          continue;
-        }
-
-      for (x = x0; x < x0 + w; x++)
-        {
-          if (x >= 0 && x < GRID)
-            {
-              face_sprite_block(s, x, y, scale, 0, 0, colour);
-            }
-        }
-    }
-}
-
-/* A filled ellipse in art coordinates, centred on cx, cy.  Integer only, so
- * the boundary is decided by a squared distance test rather than a square
- * root, and the result is deliberately blocky.
- */
-
-static void px_ellipse(const struct face_surface *s, int scale,
-                       int cx, int cy, int rx, int ry, uint16_t colour)
-{
-  int x;
-  int y;
-
-  if (rx <= 0 || ry <= 0)
-    {
-      return;
-    }
-
-  for (y = cy - ry; y <= cy + ry; y++)
-    {
-      int dy = y - cy;
-
-      if (y < 0 || y >= GRID)
-        {
-          continue;
-        }
-
-      for (x = cx - rx; x <= cx + rx; x++)
-        {
-          int dx = x - cx;
-
-          if (x < 0 || x >= GRID)
-            {
-              continue;
-            }
-
-          /* dx^2 / rx^2 + dy^2 / ry^2 <= 1, multiplied out to stay whole. */
-
-          if (dx * dx * ry * ry + dy * dy * rx * rx <= rx * rx * ry * ry)
-            {
-              face_sprite_block(s, x, y, scale, 0, 0, colour);
-            }
-        }
-    }
-}
-
 /* One eye.  A shut eye is drawn as a lash line rather than as lids closing
  * over the white, because at five pixels tall the covered version reads as a
  * blindfold instead of as a blink.
@@ -142,9 +73,9 @@ static void px_eye(const struct face_surface *s, int scale,
     {
       /* Shut.  A dark line with a slight droop at the outer end. */
 
-      px_rect(s, scale, cx - 4, cy, 9, 2, pal->colour[C_OUTLINE]);
-      px_rect(s, scale, cx - 5, cy + 1, 1, 1, pal->colour[C_OUTLINE]);
-      px_rect(s, scale, cx + 4, cy + 1, 1, 1, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, cx - 4, cy, 9, 2, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, cx - 5, cy + 1, 1, 1, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, cx + 4, cy + 1, 1, 1, pal->colour[C_OUTLINE]);
       return;
     }
 
@@ -154,16 +85,16 @@ static void px_eye(const struct face_surface *s, int scale,
    * The corners are knocked off by hand to take the hard edge away.
    */
 
-  px_rect(s, scale, cx - 4, cy - 3, 9, 7, pal->colour[C_OUTLINE]);
-  px_rect(s, scale, cx - 4, cy - 3, 1, 1, pal->colour[C_SKIN]);
-  px_rect(s, scale, cx + 4, cy - 3, 1, 1, pal->colour[C_SKIN]);
-  px_rect(s, scale, cx - 4, cy + 3, 1, 1, pal->colour[C_SKIN]);
-  px_rect(s, scale, cx + 4, cy + 3, 1, 1, pal->colour[C_SKIN]);
+  face_grid_rect(s, GRID, scale, cx - 4, cy - 3, 9, 7, pal->colour[C_OUTLINE]);
+  face_grid_rect(s, GRID, scale, cx - 4, cy - 3, 1, 1, pal->colour[C_SKIN]);
+  face_grid_rect(s, GRID, scale, cx + 4, cy - 3, 1, 1, pal->colour[C_SKIN]);
+  face_grid_rect(s, GRID, scale, cx - 4, cy + 3, 1, 1, pal->colour[C_SKIN]);
+  face_grid_rect(s, GRID, scale, cx + 4, cy + 3, 1, 1, pal->colour[C_SKIN]);
 
-  px_rect(s, scale, cx - 3, cy - 2, 7, 5, pal->colour[C_WHITE]);
+  face_grid_rect(s, GRID, scale, cx - 3, cy - 2, 7, 5, pal->colour[C_WHITE]);
 
-  px_rect(s, scale, cx - 1 + px, cy - 1 + py, 3, 3, pal->colour[C_EYE]);
-  px_rect(s, scale, cx + px, cy + py, 1, 1, pal->colour[C_OUTLINE]);
+  face_grid_rect(s, GRID, scale, cx - 1 + px, cy - 1 + py, 3, 3, pal->colour[C_EYE]);
+  face_grid_rect(s, GRID, scale, cx + px, cy + py, 1, 1, pal->colour[C_OUTLINE]);
 
   /* Upper lid comes down as the eye narrows. */
 
@@ -171,8 +102,8 @@ static void px_eye(const struct face_surface *s, int scale,
 
   if (lid > 0)
     {
-      px_rect(s, scale, cx - 5, cy - 4, 11, lid, pal->colour[C_SKIN]);
-      px_rect(s, scale, cx - 4, cy - 5 + lid, 9, 1, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, cx - 5, cy - 4, 11, lid, pal->colour[C_SKIN]);
+      face_grid_rect(s, GRID, scale, cx - 4, cy - 5 + lid, 9, 1, pal->colour[C_OUTLINE]);
     }
 }
 
@@ -196,8 +127,8 @@ void face_render_pixel(const struct face_surface *s,
   int i;
   int dx;
 
-  /* The state and the clock drive the hero preset, not this one.  The pose
-   * already carries everything this look needs.
+  /* The pose already carries everything this look needs, so the state and
+   * the clock go unused.
    */
 
   (void)state;
@@ -212,24 +143,24 @@ void face_render_pixel(const struct face_surface *s,
 
   /* Shoulders first, so the head overlaps them at the neck. */
 
-  px_rect(s, scale, 6, 40, 36, 8, pal->colour[C_CLOTH_DK]);
-  px_rect(s, scale, 8, 41, 32, 7, pal->colour[C_CLOTH_MD]);
-  px_rect(s, scale, 12, 42, 24, 6, pal->colour[C_CLOTH]);
-  px_rect(s, scale, 20, 38, 8, 4, pal->colour[C_SKIN_DK]);
+  face_grid_rect(s, GRID, scale, 6, 40, 36, 8, pal->colour[C_CLOTH_DK]);
+  face_grid_rect(s, GRID, scale, 8, 41, 32, 7, pal->colour[C_CLOTH_MD]);
+  face_grid_rect(s, GRID, scale, 12, 42, 24, 6, pal->colour[C_CLOTH]);
+  face_grid_rect(s, GRID, scale, 20, 38, 8, 4, pal->colour[C_SKIN_DK]);
 
   /* Hair behind, then the face over it, which leaves the hair showing as a
    * fringe along the top and sides.
    */
 
-  px_ellipse(s, scale, 24, 21, 16, 17, pal->colour[C_HAIR_DK]);
-  px_ellipse(s, scale, 24, 19, 15, 14, pal->colour[C_HAIR]);
-  px_ellipse(s, scale, 24, 24, 13, 15, pal->colour[C_SKIN_DK]);
-  px_ellipse(s, scale, 24, 25, 12, 14, pal->colour[C_SKIN]);
+  face_grid_ellipse(s, GRID, scale, 24, 21, 16, 17, pal->colour[C_HAIR_DK]);
+  face_grid_ellipse(s, GRID, scale, 24, 19, 15, 14, pal->colour[C_HAIR]);
+  face_grid_ellipse(s, GRID, scale, 24, 24, 13, 15, pal->colour[C_SKIN_DK]);
+  face_grid_ellipse(s, GRID, scale, 24, 25, 12, 14, pal->colour[C_SKIN]);
 
   /* Ears. */
 
-  px_rect(s, scale, 10, 24, 3, 5, pal->colour[C_SKIN_MID]);
-  px_rect(s, scale, 35, 24, 3, 5, pal->colour[C_SKIN_MID]);
+  face_grid_rect(s, GRID, scale, 10, 24, 3, 5, pal->colour[C_SKIN_MID]);
+  face_grid_rect(s, GRID, scale, 35, 24, 3, 5, pal->colour[C_SKIN_MID]);
 
   eye_cx[0] = 18;
   eye_cx[1] = 30;
@@ -244,12 +175,14 @@ void face_render_pixel(const struct face_surface *s,
    * tilted by the pose, which is most of the expression at this size.
    */
 
-  brow_y = clampi(19 - (3 * pose->brow) / FACE_UNIT, 15, 22);
+  brow_y = clampi(19 - (3 * pose->brow) / FACE_UNIT, 15, 20);
 
   for (i = 0; i < 2; i++)
     {
       /* Angry lowers the inner end, surprised raises it.  The inner end is
        * the one nearer the middle of the face, so the sign flips per side.
+       * y grows downwards, so a lowered end is a larger y, and the whole
+       * tilt is at most two rows so the inner end never crosses the eye.
        */
 
       int inner = (i == 0) ? 1 : -1;
@@ -258,24 +191,26 @@ void face_render_pixel(const struct face_surface *s,
       for (k = 0; k < 7; k++)
         {
           int bx = eye_cx[i] - 3 + k;
-          int tilt = ((k - 3) * inner * pose->brow) / FACE_UNIT;
+          int tilt = -((k - 3) * inner * pose->brow * 2) / (3 * FACE_UNIT);
 
-          px_rect(s, scale, bx, brow_y + tilt, 1, 2, pal->colour[C_HAIR_DK]);
+          face_grid_rect(s, GRID, scale, bx, brow_y + tilt, 1, 2, pal->colour[C_HAIR_DK]);
         }
     }
 
-  /* Mouth.  A parabola sampled on the grid, opening with mouth_open. */
+  /* Mouth.  A parabola sampled on the grid, opening with mouth_open.  A
+   * smile puts the middle below the corners, because y grows downwards.
+   */
 
   for (dx = -6; dx <= 6; dx++)
     {
       int32_t norm  = ((int32_t)dx * FACE_UNIT) / 6;
       int32_t bulge = FACE_UNIT - (norm * norm) / FACE_UNIT;
-      int y = 34 + (int)(((int32_t)-pose->mouth_curve * 4 * bulge)
+      int y = 34 + (int)(((int32_t)pose->mouth_curve * 4 * bulge)
                          / (FACE_UNIT * (int32_t)FACE_UNIT));
       int thick = 2 + (int)(((int32_t)pose->mouth_open * 4 * bulge)
                             / (FACE_UNIT * (int32_t)FACE_UNIT));
 
-      px_rect(s, scale, 24 + dx, y, 1, thick, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, 24 + dx, y, 1, thick, pal->colour[C_OUTLINE]);
     }
 
   if (dirty != NULL)

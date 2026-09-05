@@ -271,6 +271,44 @@ static void parabola(const struct face_surface *s, int cx, int cy, int w,
     }
 }
 
+/* A brow: a lens shaped band, thickest in the middle and tapering to both
+ * ends, tilted so its inner end sits tilt pixels below its outer end.  The
+ * inner end is the one nearer the middle of the face, and inner says which
+ * side that is: +1 when it is to the right of cx, -1 when to the left.
+ */
+
+static void brow(const struct face_surface *s, int cx, int cy, int w,
+                 int thickness, int tilt, int inner, uint16_t colour)
+{
+  int half_w = w / 2;
+  int dx;
+
+  if (half_w <= 0 || thickness <= 0)
+    {
+      return;
+    }
+
+  for (dx = -half_w; dx <= half_w; dx++)
+    {
+      int32_t norm  = (int32_t)dx * FACE_UNIT / half_w;
+      int32_t bulge = FACE_UNIT - (norm * norm) / FACE_UNIT;
+      int y = cy + (tilt * dx * inner) / half_w;
+      int thick = (int)((int32_t)thickness
+                        * (FACE_UNIT / 4 + (3 * bulge) / 4) / FACE_UNIT);
+      int t;
+
+      if (thick < 1)
+        {
+          thick = 1;
+        }
+
+      for (t = 0; t < thick; t++)
+        {
+          span(s, y - thick / 2 + t, cx + dx, cx + dx, colour);
+        }
+    }
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -305,6 +343,7 @@ void face_render(const struct face_surface *s, const struct face_pose *pose,
   uint16_t iris  = rgb565(150 + lift, 90 + lift, 40 + lift / 2);
   uint16_t pupil = rgb565(20, 14, 12);
   uint16_t trim  = rgb565(120 + lift, 70 + lift, 32 + lift / 2);
+  uint16_t shine = rgb565(255, 236, 200);
 
   cx[0] = pct(s->width, EYE_CX_L_PCT);
   cx[1] = pct(s->width, EYE_CX_R_PCT);
@@ -322,14 +361,19 @@ void face_render(const struct face_surface *s, const struct face_pose *pose,
 
   for (i = 0; i < 2; i++)
     {
-      /* Brow above the eye, dropping as brow goes negative. */
+      /* Brow above the eye.  It drops as brow goes negative, and its inner
+       * end drops further, so a lowered brow reads as a frown and a raised
+       * one as surprise rather than as the same bar at a different height.
+       */
 
       int brow_gap = pct(s->height, BROW_GAP_PCT)
                      + (pose->brow * pct(s->height, 6)) / FACE_UNIT;
       int brow_h = pct(s->height, BROW_H_PCT);
+      int tilt = -(pose->brow * pct(s->height, 3)) / FACE_UNIT;
 
-      round_rect(s, cx[i], eye_cy - eye_h_max / 2 - brow_gap,
-                 pct(s->width, BROW_W_PCT), brow_h, brow_h / 2, trim);
+      brow(s, cx[i], eye_cy - eye_h_max / 2 - brow_gap,
+           pct(s->width, BROW_W_PCT), brow_h + 1, tilt, i == 0 ? 1 : -1,
+           trim);
 
       if (eye_h[i] <= 2)
         {
@@ -375,6 +419,18 @@ void face_render(const struct face_surface *s, const struct face_pose *pose,
 
           circle_in_round_rect(s, cx[i], eye_cy, eye_w / 2, eye_h[i] / 2,
                                eye_w / 2, px, py, pr, pupil);
+
+          /* A catchlight in the upper left of the pupil.  It stays inside
+           * the pupil's circle, so it changes colours but never which
+           * pixels are lit.
+           */
+
+          if (pr >= 6)
+            {
+              circle_in_round_rect(s, cx[i], eye_cy, eye_w / 2,
+                                   eye_h[i] / 2, eye_w / 2,
+                                   px - pr / 3, py - pr / 3, pr / 4, shine);
+            }
         }
     }
 

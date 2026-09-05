@@ -44,8 +44,8 @@ most of it is testable on the host:
   expressions is interpolation. It knows nothing about NuttX.
 - `src/face_preset.c` holds the table of looks. A preset is a name and a
   render function, and `face_render.c` is simply the first row in it.
-  `face_pixel.c` and `face_hero.c` are the other two, with the hero's art in
-  `face_hero_art.c` and the shared blit and palettes in `face_sprite.c`.
+  `face_pixel.c` and `face_crab.c` are the other two, drawn from shapes on a
+  coarse grid with the grid drawing and the palettes in `face_sprite.c`.
 - `src/face_input.c` turns a button mask into an action. It is a pure function
   of the current and previous masks, with no board code, so the edge detection
   is tested on the host.
@@ -54,12 +54,12 @@ most of it is testable on the host:
   `/dev/fb0`, runs the render loop at about 30 frames per second, reads the
   current state out of a file, and reads `/dev/buttons`.
 
-Nothing here stores a full frame. One 240x240 frame is 115,200 bytes, so a
-bitmap for each expression in each preset would be most of the flash. The
-vector and pixel presets draw from shapes instead, which also lets them blend
-between expressions. The hero preset does use bitmaps, but they are 32 by 32
-and indexed to a 16 entry palette, then scaled up on the way to the panel, so
-a pose costs about a kilobyte rather than a hundred.
+Nothing here stores a full frame or a bitmap. One 240x240 frame is 115,200
+bytes, so a bitmap for each expression in each preset would be most of the
+flash. Every preset draws from shapes instead, which also lets them all blend
+between expressions. The pixel presets get their look by drawing those shapes
+on a grid of 48 or 40 cells and blowing each cell up to a block of panel
+pixels, so the edges land on block boundaries.
 
 ### Host Tests
 
@@ -71,7 +71,8 @@ make -C experiments/pico-face/test test
 
 The address and undefined behaviour sanitizers are on by default, since an out
 of bounds write in the drawing code is the failure worth catching. Three tests
-earned their place by catching real bugs:
+earned their place by catching real bugs, and two more were added when the
+pixel portrait turned out to have the same two signs backwards:
 
 - The widest row of an eye has to be its middle. The first version of the
   corner arithmetic measured the inset from the wrong side and drew an
@@ -80,6 +81,10 @@ earned their place by catching real bugs:
   wrong drew a frown for `done` and a smile for `failed`.
 - Moving the pupil must not light any pixel outside the eye. It used to spill
   over a narrowed lid and read as a dark blob hanging off the face.
+- A lowered brow has to drop its inner end and a raised one has to lift it.
+  The pixel portrait had this and the smile inverted, so `waiting` looked
+  angry, `failed` smiled, and `done` frowned, and the contact sheet below is
+  where it showed.
 
 ### Looking at It Without Flashing
 
@@ -148,23 +153,22 @@ without knowing anything about it.
 | --- | --- |
 | `vector` | The original amber face, drawn from shapes. |
 | `pixel` | A pixel portrait bust on a 48 by 48 grid, five panel pixels per art pixel. |
-| `hero` | A 32 by 32 character sprite, one pose per expression. |
+| `crab` | An angry crab whose shell is its face, after the well known drawing, on a 40 by 40 grid. |
 
-The first two take their whole shape from `struct face_pose`, so blinks and
-pupil drift work in both. The hero picks its pose from the state and the clock
-instead, because at 32 pixels an eyelid is one pixel and a blink would not
-read. Its idle motion is a one pixel bob of the whole sprite rather than a
-second frame, which animates it for no extra art.
+All three take their whole shape from `struct face_pose`, so blinks, pupil
+drift, and brow tilt work everywhere. The crab adds a bias of its own: its
+brows sit lower than the pose asks, so it is grumpy at rest and furious on
+`failed`, where a frown also opens its mouth into a shout with teeth and
+lifts its claws. It keeps its own orange rather than using the palettes,
+because a purple crab is not the crab in the drawing. The pixel portrait
+follows the palette the B button picks.
 
-Sprite art lives in `src/face_hero_art.c` as rows of characters, one per pixel.
-A dot is transparent and a hex digit picks a palette entry, so the art is
-editable in a text editor and readable in a diff. `test_sprite.c` checks that
-every row is the declared width and holds only characters the palette can
-resolve, which is the failure this format invites: a short row shifts every
-pixel after it without breaking anything else.
-
-Palettes are held apart from the art, so all three colour sets work on every
-sprite and cycling them is nearly free.
+An earlier third preset was a 32 by 32 character sprite with one hand drawn
+pose per expression. It was dropped because the art did not read at this
+size and hand editing 32 rows of characters per pose made it expensive to
+change. If sprites come back, `test_sprite.c` is where a row length check
+belongs, since a short row shifts every pixel after it without failing
+anything else.
 
 ### Panel Controls
 
@@ -238,9 +242,8 @@ Two limits worth knowing:
 - The renderer redraws the whole panel every frame, which is where the 15.7
   percent goes. The dirty box is already in the interface, and a blink touches
   two small rectangles, so partial redraw should cut this by most of itself.
-- The vector preset still changes brow position only, not brow shape. The pixel
-  portrait angles its brows and carries the expression better for it, so the
-  same treatment is the obvious next change to the vector look.
+- The vector preset's brows tilt but its mouth does not change shape beyond
+  its curve, so `waiting` and `working` differ mostly in the eyes.
 - Brightness dims the rendered pixels rather than the backlight. The backlight
   pad is a plain GPIO in the board glue and only knows on and off, so real
   dimming means moving that pin to `RP23XX_PWM`.

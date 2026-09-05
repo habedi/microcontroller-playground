@@ -1,17 +1,15 @@
 /****************************************************************************
  * experiments/pico-face/test/test_sprite.c
  *
- * Host tests for the sprite data, the palettes, and the preset table.  The
- * art is the part most likely to break silently, because a miscounted row
- * shifts every pixel after it without failing anything, so most of this file
- * is about the data rather than the drawing.
+ * Host tests for the palettes, the preset table, and the pixel art presets.
+ * The vector preset has its own file; these cover the two drawn on a grid,
+ * whose expression signs are the thing that has gone wrong before.
  *
  ****************************************************************************/
 
 #include <stdio.h>
 #include <string.h>
 
-#include "face_hero_art.h"
 #include "face_preset.h"
 #include "face_sprite.h"
 
@@ -58,66 +56,6 @@ static struct face_surface panel(void)
 /****************************************************************************
  * Tests
  ****************************************************************************/
-
-/* Every row of every hero pose has to be exactly the declared width, and
- * hold only characters the palette can resolve.  A short row would otherwise
- * read past its end.
- */
-
-static void test_hero_art_is_well_formed(void)
-{
-  int i;
-
-  for (i = 0; i < FACE_NSTATES; i++)
-    {
-      const struct face_sprite *spr = &g_hero_poses[i];
-      int y;
-
-      check(spr->w > 0 && spr->h > 0, "hero sprite has a size");
-      check(spr->rows != NULL, "hero sprite has rows");
-
-      for (y = 0; y < spr->h; y++)
-        {
-          const char *row = spr->rows[y];
-          size_t len = strlen(row);
-          int x;
-          int ok = 1;
-
-          if (len != (size_t)spr->w)
-            {
-              printf("  pose %d row %d is %u wide, want %d\n",
-                     i, y, (unsigned)len, spr->w);
-            }
-
-          check(len == (size_t)spr->w, "hero row is the declared width");
-
-          for (x = 0; x < (int)len; x++)
-            {
-              if (row[x] != '.' && face_sprite_index(row[x]) < 0)
-                {
-                  ok = 0;
-                }
-            }
-
-          check(ok, "hero row holds only palette characters");
-        }
-    }
-}
-
-/* A transparent pixel and a palette pixel have to be told apart the same way
- * everywhere, so this pins the mapping down rather than trusting it.
- */
-
-static void test_sprite_index(void)
-{
-  check(face_sprite_index('.') < 0, "a dot is transparent");
-  check(face_sprite_index(' ') < 0, "a space is transparent");
-  check(face_sprite_index('x') < 0, "an unknown letter is transparent");
-  check(face_sprite_index('0') == 0, "0 is the first palette entry");
-  check(face_sprite_index('9') == 9, "9 is the tenth");
-  check(face_sprite_index('a') == 10, "a follows 9");
-  check(face_sprite_index('f') == 15, "f is the last");
-}
 
 static void test_palettes(void)
 {
@@ -204,29 +142,6 @@ static void test_every_preset_draws(void)
     }
 }
 
-/* A sprite placed so that it hangs off every edge must not write outside the
- * surface.  Run under the address sanitizer this is the real check.
- */
-
-static void test_blit_clips(void)
-{
-  struct face_surface surf = panel();
-  const struct face_palette *pal = face_palette(0);
-  int offs[] = { -200, -1, 0, 1, 200 };
-  size_t i;
-  size_t j;
-
-  for (i = 0; i < sizeof(offs) / sizeof(offs[0]); i++)
-    {
-      for (j = 0; j < sizeof(offs) / sizeof(offs[0]); j++)
-        {
-          face_sprite_blit(&surf, &g_hero_poses[0], pal, offs[i], offs[j], 7);
-        }
-    }
-
-  check(1, "blitting off every edge stayed in bounds");
-}
-
 /* A panel smaller than one sprite pixel per block still has to be safe, since
  * the scale is worked out from the surface size.
  */
@@ -255,19 +170,173 @@ static void test_tiny_surface(void)
   check(1, "an eight pixel panel did not overrun");
 }
 
+/* Row of the first pixel of a colour in one column, or -1. */
+
+static int first_row_of(const struct face_surface *s, int x, int y0, int y1,
+                        uint16_t colour)
+{
+  int y;
+
+  for (y = y0; y < y1; y++)
+    {
+      if (s->pixels[(size_t)y * (size_t)s->stride_px + (size_t)x] == colour)
+        {
+          return y;
+        }
+    }
+
+  return -1;
+}
+
+/* The pixel portrait had both of its expression signs backwards: done
+ * frowned and failed smiled, and the brows of waiting were angry.  These pin
+ * the directions the same way test_render.c does for the vector face.  The
+ * art is on a 48 grid, five panel pixels per cell, so a cell's column is
+ * sampled at its middle.
+ */
+
+#define CELL(n) ((n) * 5 + 2)
+
+static void test_pixel_smile_points_the_right_way(void)
+{
+  struct face_surface surf = panel();
+  const struct face_palette *pal = face_palette(0);
+  struct face_dirty dirty;
+  struct face_pose p;
+  int mid;
+  int end;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+  p.mouth_curve = FACE_UNIT;
+
+  face_render_pixel(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+
+  /* The mouth is centred on cell 24 and runs from cell 18 to 30, below the
+   * eyes and above the shoulders, so rows 150 to 199 hold only its outline
+   * colour in those columns.
+   */
+
+  mid = first_row_of(&surf, CELL(24), 150, 200, pal->colour[1]);
+  end = first_row_of(&surf, CELL(18), 150, 200, pal->colour[1]);
+  check(mid > 0 && end > 0, "the pixel mouth drew something");
+  check(mid > end, "a pixel smile dips in the middle");
+}
+
+static void test_pixel_brow_tilts_the_right_way(void)
+{
+  struct face_surface surf = panel();
+  const struct face_palette *pal = face_palette(0);
+  struct face_dirty dirty;
+  struct face_pose p;
+  int outer;
+  int inner;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+
+  /* The left eye is at cell 18 and its brow spans cells 15 to 21.  Between
+   * the hair and the eye's white, rows 60 to 114, the brow colour appears
+   * nowhere else in those columns.  A fully lowered brow reaches the eye's
+   * outline row and no further.
+   */
+
+  p.brow = -FACE_UNIT;
+  face_render_pixel(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  outer = first_row_of(&surf, CELL(15), 60, 115, pal->colour[6]);
+  inner = first_row_of(&surf, CELL(21), 60, 115, pal->colour[6]);
+  check(outer > 0 && inner > 0, "a lowered pixel brow drew both ends");
+  check(inner > outer, "a lowered pixel brow drops its inner end");
+
+  p.brow = FACE_UNIT;
+  face_render_pixel(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  outer = first_row_of(&surf, CELL(15), 60, 115, pal->colour[6]);
+  inner = first_row_of(&surf, CELL(21), 60, 115, pal->colour[6]);
+  check(outer > 0 && inner > 0, "a raised pixel brow drew both ends");
+  check(inner < outer, "a raised pixel brow lifts its inner end");
+}
+
+/* The crab is on a 40 grid, six panel pixels per cell. */
+
+#define CRAB(n) ((n) * 6 + 3)
+
+/* Same sign check for the crab.  Its mouth is centred on cell 20 and runs
+ * from cell 15 to 25, and its outline is the only near black in those
+ * columns between the glasses and the stubble.
+ */
+
+static void test_crab_smile_points_the_right_way(void)
+{
+  struct face_surface surf = panel();
+  struct face_dirty dirty;
+  struct face_pose p;
+  uint16_t line;
+  int mid;
+  int end;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+  p.mouth_curve = FACE_UNIT;
+
+  face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+
+  /* The outline colour is read back from a glasses frame cell, so the test
+   * does not have to know the crab's palette.
+   */
+
+  line = g_pixels[(size_t)CRAB(16) * PANEL + (size_t)CRAB(10)];
+
+  mid = first_row_of(&surf, CRAB(20), CRAB(24), CRAB(32), line);
+  end = first_row_of(&surf, CRAB(15), CRAB(24), CRAB(32), line);
+  check(mid > 0 && end > 0, "the crab mouth drew something");
+  check(mid > end, "a crab smile dips in the middle");
+}
+
+/* At rest the crab's brows are already down, which is the whole joke: with
+ * a neutral pose its inner brow ends sit lower than its outer ones.
+ */
+
+static void test_crab_is_angrier_than_the_pose(void)
+{
+  struct face_surface surf = panel();
+  struct face_dirty dirty;
+  struct face_pose p;
+  uint16_t line;
+  int outer;
+  int inner;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+
+  face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  line = g_pixels[(size_t)CRAB(16) * PANEL + (size_t)CRAB(10)];
+
+  /* Left brow, cells 11 to 17, above the frame's top edge at cell 16. */
+
+  outer = first_row_of(&surf, CRAB(11), CRAB(10), CRAB(16), line);
+  inner = first_row_of(&surf, CRAB(17), CRAB(10), CRAB(16), line);
+  check(outer > 0 && inner > 0, "the crab drew both brow ends");
+  check(inner > outer, "a resting crab lowers its inner brow ends");
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 int main(void)
 {
-  test_hero_art_is_well_formed();
-  test_sprite_index();
   test_palettes();
   test_preset_wrap();
   test_every_preset_draws();
-  test_blit_clips();
   test_tiny_surface();
+  test_pixel_smile_points_the_right_way();
+  test_pixel_brow_tilts_the_right_way();
+  test_crab_smile_points_the_right_way();
+  test_crab_is_angrier_than_the_pose();
 
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
