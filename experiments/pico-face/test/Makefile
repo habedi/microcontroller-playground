@@ -36,6 +36,7 @@ $(BUILD)/test_render: test_render.c $(SRC)/face.c $(SRC)/face_render.c \
 
 PRESET_SRCS = $(SRC)/face.c $(SRC)/face_render.c $(SRC)/face_sprite.c \
               $(SRC)/face_pixel.c $(SRC)/face_crab.c $(SRC)/face_penguin.c \
+              $(SRC)/face_graph.c $(SRC)/face_overlay.c $(SRC)/face_font.c \
               $(SRC)/face_preset.c
 
 $(BUILD)/test_sprite: test_sprite.c $(PRESET_SRCS) | $(BUILD)

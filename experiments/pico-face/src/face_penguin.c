@@ -33,8 +33,9 @@
 #define C_BG      face_rgb565(168, 214, 236)
 #define C_LINE    face_rgb565(16, 16, 20)
 #define C_WHITE   face_rgb565(250, 250, 250)
-#define C_GREY    face_rgb565(126, 130, 136)
-#define C_GREY_DK face_rgb565(92, 96, 102)
+#define C_GREY    face_rgb565(130, 134, 140)
+#define C_GREY_DK face_rgb565(96, 100, 108)
+#define C_WING    face_rgb565(110, 114, 122)
 #define C_BEAK    face_rgb565(240, 168, 56)
 #define C_BEAK_DK face_rgb565(120, 60, 20)
 #define C_BROWN   face_rgb565(142, 84, 40)
@@ -99,33 +100,43 @@ static void dome(const struct face_surface *s, int scale, int cx, int cy,
     }
 }
 
-/* A horn: a run of blocks from the helmet up and out, thick at the base and
- * one cell wide at the tip, with a dark outline under it.
+/* A horn: one row of blocks per cell of height from the band up to the tip,
+ * flaring out from the helmet and then curling back up and in, as the
+ * drawing's do.  Thick at the base, one cell at the tip, outlined.  dir is
+ * +1 for a horn that flares to the right and -1 for one that flares left.
  */
 
 static void horn(const struct face_surface *s, int scale, int x0, int y0,
-                 int x1, int y1)
+                 int height, int dir)
 {
-  int steps = y0 - y1;
-  int i;
+  int pass;
 
-  for (i = 0; i <= steps; i++)
+  for (pass = 0; pass < 2; pass++)
     {
-      int x = x0 + ((x1 - x0) * i) / steps;
-      int y = y0 - i;
-      int thick = 3 - (2 * i) / steps;
+      int i;
 
-      rect(s, scale, x - thick / 2 - 1, y - 1, thick + 2, 3, C_LINE);
-    }
+      for (i = 0; i <= height; i++)
+        {
+          /* Outward quickly at first, then back in towards the tip. */
 
-  for (i = 0; i <= steps; i++)
-    {
-      int x = x0 + ((x1 - x0) * i) / steps;
-      int y = y0 - i;
-      int thick = 3 - (2 * i) / steps;
+          int out = (i * (2 * height - i)) / (height * 2 / 3 + 1) / 3;
+          int back = (i > height * 2 / 3) ? (i - height * 2 / 3) : 0;
+          int x = x0 + dir * (out - back);
+          int y = y0 - i;
+          int thick = 3 - (2 * i) / height;
 
-      rect(s, scale, x - thick / 2, y, thick, 1, C_HORN);
-      rect(s, scale, x - thick / 2, y, 1, 1, C_HORN_DK);
+          if (pass == 0)
+            {
+              rect(s, scale, x - thick / 2 - 1, y - 1, thick + 2, 3,
+                   C_LINE);
+            }
+          else
+            {
+              rect(s, scale, x - thick / 2, y, thick, 1, C_HORN);
+              rect(s, scale, x - thick / 2 + (dir > 0 ? thick - 1 : 0), y,
+                   1, 1, C_HORN_DK);
+            }
+        }
     }
 }
 
@@ -196,25 +207,29 @@ void face_render_penguin(const struct face_surface *s,
 
   face_sprite_clear(s, C_BG);
 
-  /* Body: grey back on the left, white belly to the right, outlined. */
+  /* Body: grey back on the left, white belly to the right, outlined, with
+   * the wing lying along the left side.
+   */
 
-  ellipse(s, scale, 20 + ox, 37, 16, 15, C_LINE);
-  ellipse(s, scale, 20 + ox, 37, 15, 14, C_GREY);
-  ellipse(s, scale, 24 + ox, 38, 10, 12, C_WHITE);
+  ellipse(s, scale, 20 + ox, 37, 17, 15, C_LINE);
+  ellipse(s, scale, 20 + ox, 37, 16, 14, C_GREY);
+  ellipse(s, scale, 25 + ox, 38, 11, 12, C_WHITE);
+  ellipse(s, scale, 8 + ox, 34, 5, 9, C_LINE);
+  ellipse(s, scale, 8 + ox, 34, 4, 8, C_WING);
 
   /* Head, with the grey of the back showing as a crescent on the left. */
 
-  ellipse(s, scale, 20 + ox, 21, 12, 11, C_LINE);
-  ellipse(s, scale, 20 + ox, 21, 11, 10, C_GREY);
-  ellipse(s, scale, 22 + ox, 21, 9, 9, C_WHITE);
+  ellipse(s, scale, 20 + ox, 21, 13, 11, C_LINE);
+  ellipse(s, scale, 20 + ox, 21, 12, 10, C_GREY);
+  ellipse(s, scale, 22 + ox, 21, 10, 9, C_WHITE);
 
   /* Eyes and beak.  The gaze moves the glint, not the eye. */
 
   px = clampi(pose->pupil_x / (FACE_UNIT / 2 + 1), -1, 1);
   py = clampi(pose->pupil_y / (FACE_UNIT / 2 + 1), 0, 1);
 
-  eye(s, scale, 15 + ox, 17, pose->eye_open_l, px, py);
-  eye(s, scale, 24 + ox, 17, pose->eye_open_r, px, py);
+  eye(s, scale, 14 + ox, 17, pose->eye_open_l, px, py);
+  eye(s, scale, 25 + ox, 17, pose->eye_open_r, px, py);
 
   open = (3 * clampi(pose->mouth_open, 0, FACE_UNIT)) / FACE_UNIT;
 
@@ -233,37 +248,44 @@ void face_render_penguin(const struct face_surface *s,
    * and a horn each side.  Drawn after the head so it sits on top of it.
    */
 
-  dome(s, scale, 20 + ox, 13 + helmet, 13, 9, C_LINE);
-  dome(s, scale, 20 + ox, 13 + helmet, 12, 8, C_BROWN);
-  dome(s, scale, 16 + ox, 13 + helmet, 6, 6, C_BROWN_D);
-  dome(s, scale, 17 + ox, 13 + helmet, 5, 5, C_BROWN);
+  dome(s, scale, 20 + ox, 13 + helmet, 14, 9, C_LINE);
+  dome(s, scale, 20 + ox, 13 + helmet, 13, 8, C_BROWN);
+  dome(s, scale, 15 + ox, 13 + helmet, 6, 6, C_BROWN_D);
+  dome(s, scale, 16 + ox, 13 + helmet, 5, 5, C_BROWN);
 
-  rect(s, scale, 7 + ox, 11 + helmet, 26, 5, C_LINE);
-  rect(s, scale, 8 + ox, 12 + helmet, 24, 3, C_STEEL);
-  rect(s, scale, 8 + ox, 14 + helmet, 24, 1, C_STEEL_D);
+  rect(s, scale, 6 + ox, 11 + helmet, 28, 5, C_LINE);
+  rect(s, scale, 7 + ox, 12 + helmet, 26, 3, C_STEEL);
+  rect(s, scale, 7 + ox, 14 + helmet, 26, 1, C_STEEL_D);
 
-  rect(s, scale, 18 + ox, 4 + helmet, 4, 9, C_LINE);
-  rect(s, scale, 19 + ox, 5 + helmet, 2, 8, C_STEEL);
+  rect(s, scale, 18 + ox, 3 + helmet, 4, 10, C_LINE);
+  rect(s, scale, 19 + ox, 4 + helmet, 2, 9, C_STEEL);
 
-  for (i = 10; i <= 30; i += 4)
+  /* Rivets: pale discs along the band and down the strip. */
+
+  for (i = 9; i <= 31; i += 4)
     {
-      rect(s, scale, i + ox, 13 + helmet, 1, 1, C_GREY_DK);
+      rect(s, scale, i + ox, 13 + helmet, 1, 1, C_WHITE);
+      rect(s, scale, i + ox, 14 + helmet, 1, 1, C_GREY_DK);
     }
 
-  rect(s, scale, 19 + ox, 7 + helmet, 1, 1, C_GREY_DK);
-  rect(s, scale, 19 + ox, 10 + helmet, 1, 1, C_GREY_DK);
+  rect(s, scale, 19 + ox, 6 + helmet, 1, 1, C_WHITE);
+  rect(s, scale, 19 + ox, 9 + helmet, 1, 1, C_WHITE);
 
-  horn(s, scale, 9 + ox, 10 + helmet, 4 + ox, 2 + helmet);
-  horn(s, scale, 31 + ox, 10 + helmet, 36 + ox, 2 + helmet);
+  horn(s, scale, 8 + ox, 11 + helmet, 9, -1);
+  horn(s, scale, 32 + ox, 11 + helmet, 9, 1);
 
-  /* Bow tie on a string round the neck. */
+  /* Bow tie on a string that hangs lower in the middle of the neck. */
 
-  rect(s, scale, 11 + ox, 30, 18, 1, C_LINE);
-  rect(s, scale, 16 + ox, 29, 3, 4, C_LINE);
-  rect(s, scale, 21 + ox, 29, 3, 4, C_LINE);
-  rect(s, scale, 19 + ox, 30, 2, 2, C_LINE);
-  rect(s, scale, 17 + ox, 30, 1, 1, C_GREY_DK);
-  rect(s, scale, 22 + ox, 30, 1, 1, C_GREY_DK);
+  for (i = -9; i <= 9; i++)
+    {
+      rect(s, scale, 20 + ox + i, 27 + (81 - i * i) / 30, 1, 1, C_LINE);
+    }
+
+  rect(s, scale, 15 + ox, 28, 3, 4, C_LINE);
+  rect(s, scale, 22 + ox, 28, 3, 4, C_LINE);
+  rect(s, scale, 18 + ox, 29, 4, 2, C_LINE);
+  rect(s, scale, 16 + ox, 29, 1, 1, C_GREY_DK);
+  rect(s, scale, 23 + ox, 29, 1, 1, C_GREY_DK);
 
   if (dirty != NULL)
     {

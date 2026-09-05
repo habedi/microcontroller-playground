@@ -3,13 +3,13 @@
  *
  * The crab preset: an angry crustacean whose shell is its face, after the
  * well known drawing.  Drawn from shapes on a 40 by 40 grid blown up to the
- * panel, with a black outline under every orange shape, so it reads as
- * outlined pixel art rather than as smooth ellipses.
+ * panel, with a dark orange outline under every orange shape, on the white
+ * ground of the original.
  *
  * The face takes its expression from the pose like the other drawn presets,
- * with one twist: the brows carry an anger bias, so the crab is grumpy at
- * rest and furious when a tool fails, and a frown opens its mouth into a
- * shout.
+ * with two twists: the brows carry an anger bias, so the crab is grumpy at
+ * rest and furious when a tool fails, and the mouth is never quite shut,
+ * so its teeth show at rest and a frown opens it into a shout.
  *
  ****************************************************************************/
 
@@ -26,23 +26,27 @@
 
 #define GRID 40
 
-/* How much angrier than the pose the crab always is, on the brow scale. */
+/* How much angrier than the pose the crab always is, on the brow scale, and
+ * how far open its mouth always is, on the mouth scale.
+ */
 
 #define ANGER_BIAS 500
+#define MOUTH_BIAS 300
 
 /* Colours.  The crab keeps its own rather than using the shared palettes,
  * because a purple crab is not the crab in the drawing.
  */
 
-#define C_BG      face_rgb565(14, 8, 6)
-#define C_LINE    face_rgb565(12, 8, 8)
-#define C_SHELL   face_rgb565(238, 78, 18)
-#define C_SHADE   face_rgb565(186, 48, 10)
-#define C_LIGHT   face_rgb565(252, 124, 60)
-#define C_WHITE   face_rgb565(245, 242, 235)
-#define C_RIM     face_rgb565(196, 30, 26)
-#define C_TEETH   face_rgb565(236, 226, 176)
-#define C_MOUTH   face_rgb565(56, 10, 10)
+#define C_BG      face_rgb565(246, 246, 244)
+#define C_LINE    face_rgb565(150, 42, 4)
+#define C_INK     face_rgb565(18, 14, 14)
+#define C_SHELL   face_rgb565(242, 86, 22)
+#define C_SHADE   face_rgb565(204, 60, 10)
+#define C_LIGHT   face_rgb565(250, 132, 72)
+#define C_WHITE   face_rgb565(252, 250, 246)
+#define C_RIM     face_rgb565(200, 30, 26)
+#define C_TEETH   face_rgb565(232, 222, 170)
+#define C_MOUTH   face_rgb565(60, 12, 12)
 
 /****************************************************************************
  * Private Functions
@@ -84,8 +88,9 @@ static void limb(const struct face_surface *s, int scale, int x0, int y0,
 {
   int dx = x1 - x0;
   int dy = y1 - y0;
-  int steps = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
-              ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+  int adx = dx < 0 ? -dx : dx;
+  int ady = dy < 0 ? -dy : dy;
+  int steps = adx > ady ? adx : ady;
   int i;
 
   for (i = 0; i <= steps; i++)
@@ -97,41 +102,43 @@ static void limb(const struct face_surface *s, int scale, int x0, int y0,
     }
 }
 
-/* An outlined limb: the black run first, then the orange one inside it. */
+/* An outlined limb: the outline run first, then the orange one inside it. */
 
 static void leg(const struct face_surface *s, int scale, int x0, int y0,
-                int x1, int y1)
+                int x1, int y1, int thick)
 {
-  limb(s, scale, x0, y0, x1, y1, 3, C_LINE);
-  limb(s, scale, x0, y0, x1, y1, 1, C_SHELL);
+  limb(s, scale, x0, y0, x1, y1, thick + 2, C_LINE);
+  limb(s, scale, x0, y0, x1, y1, thick, C_SHELL);
 }
 
-/* One claw with its arm, mirrored for the right side.  lift raises it, which
- * is what the crab does when it is angrier than usual.
+/* One claw with its arm, mirrored for the right side.  lift raises it,
+ * which is what the crab does when it is angrier than usual.
  */
 
 static void claw(const struct face_surface *s, int scale, int mirror,
                  int lift)
 {
-  int cx = mirror ? GRID - 1 - 8 : 8;
-  int cy = 9 - lift;
-  int zig;
+  int cx = mirror ? GRID - 1 - 7 : 7;
+  int cy = 8 - lift;
+  int shoulder = mirror ? GRID - 1 - 10 : 10;
   int i;
 
-  /* Arm from the shell's shoulder up to the claw. */
+  /* The arm, from the shoulder of the shell up to the claw. */
 
-  limb(s, scale, mirror ? GRID - 1 - 12 : 12, 20, cx, cy + 5, 3, C_LINE);
-  limb(s, scale, mirror ? GRID - 1 - 12 : 12, 20, cx, cy + 5, 1, C_SHELL);
+  leg(s, scale, shoulder, 17, cx, cy + 5, 2);
 
-  ellipse(s, scale, cx, cy, 5, 6, C_LINE);
-  ellipse(s, scale, cx, cy, 4, 5, C_SHELL);
-  ellipse(s, scale, cx - 1, cy - 2, 2, 2, C_LIGHT);
+  /* A mitten shaped claw: tall oval with a white zigzag for the gap between
+   * the pincers, and a highlight on the outer side.
+   */
 
-  /* The pincer's gap, a white zigzag down the middle. */
+  ellipse(s, scale, cx, cy, 6, 7, C_LINE);
+  ellipse(s, scale, cx, cy, 5, 6, C_SHELL);
+  ellipse(s, scale, mirror ? cx + 2 : cx - 2, cy - 2, 2, 3, C_LIGHT);
 
-  for (i = -4; i <= 2; i++)
+  for (i = -5; i <= 3; i++)
     {
-      zig = (i & 1) ? -1 : 0;
+      int zig = (i & 1) ? (mirror ? 1 : -1) : 0;
+
       rect(s, scale, cx + zig, cy + i, 1, 1, C_WHITE);
     }
 }
@@ -139,22 +146,18 @@ static void claw(const struct face_surface *s, int scale, int mirror,
 static void eye(const struct face_surface *s, int scale, int x, int open,
                 int px, int py)
 {
-  /* Rows of lid, rounded down so a glare at 280 still shows two rows of
-   * white and only a real blink shuts the eye.
-   */
-
   int lid = (4 * (FACE_UNIT - clampi(open, 0, FACE_UNIT))) / FACE_UNIT;
 
   /* Red rim, white, and a pupil that follows the gaze. */
 
-  rect(s, scale, x, 18, 6, 4, C_RIM);
-  rect(s, scale, x + 1, 18, 4, 4, C_WHITE);
-  rect(s, scale, x + 2 + px, 19 + py, 2, 2, C_LINE);
+  rect(s, scale, x, 18, 7, 4, C_RIM);
+  rect(s, scale, x + 1, 18, 5, 4, C_WHITE);
+  rect(s, scale, x + 2 + px, 19 + py, 2, 2, C_INK);
 
   if (lid > 0)
     {
-      rect(s, scale, x, 18, 6, lid, C_SHELL);
-      rect(s, scale, x, 17 + lid, 6, 1, C_LINE);
+      rect(s, scale, x, 18, 7, lid, C_SHELL);
+      rect(s, scale, x, 17 + lid, 7, 1, C_INK);
     }
 }
 
@@ -179,10 +182,6 @@ void face_render_crab(const struct face_surface *s,
   int i;
   int dx;
 
-  /* The crab has its own colours and takes its shape from the pose, so
-   * the state, the clock, and the palette are not needed here.
-   */
-
   (void)state;
   (void)now_ms;
   (void)palette;
@@ -198,49 +197,58 @@ void face_render_crab(const struct face_surface *s,
    * two segments: out from the shell, then down.
    */
 
-  leg(s, scale, 10, 26, 4, 29);
-  leg(s, scale, 4, 29, 2, 35);
-  leg(s, scale, 11, 29, 6, 33);
-  leg(s, scale, 6, 33, 5, 38);
-  leg(s, scale, 13, 31, 10, 35);
-  leg(s, scale, 10, 35, 9, 39);
+  leg(s, scale, 9, 27, 3, 30, 1);
+  leg(s, scale, 3, 30, 1, 36, 1);
+  leg(s, scale, 10, 30, 5, 34, 1);
+  leg(s, scale, 5, 34, 4, 39, 1);
+  leg(s, scale, 13, 33, 10, 36, 1);
+  leg(s, scale, 10, 36, 9, 39, 1);
 
-  leg(s, scale, 29, 26, 35, 29);
-  leg(s, scale, 35, 29, 37, 35);
-  leg(s, scale, 28, 29, 33, 33);
-  leg(s, scale, 33, 33, 34, 38);
-  leg(s, scale, 26, 31, 29, 35);
-  leg(s, scale, 29, 35, 30, 39);
+  leg(s, scale, 30, 27, 36, 30, 1);
+  leg(s, scale, 36, 30, 38, 36, 1);
+  leg(s, scale, 29, 30, 34, 34, 1);
+  leg(s, scale, 34, 34, 35, 39, 1);
+  leg(s, scale, 26, 33, 29, 36, 1);
+  leg(s, scale, 29, 36, 30, 39, 1);
 
   claw(s, scale, 0, lift);
   claw(s, scale, 1, lift);
 
-  /* The shell, which is also the face. */
+  /* The shell, which is also the face: a big round body. */
 
-  ellipse(s, scale, 20, 23, 13, 11, C_LINE);
-  ellipse(s, scale, 20, 23, 12, 10, C_SHELL);
-  ellipse(s, scale, 20, 29, 9, 3, C_SHADE);
+  ellipse(s, scale, 20, 23, 14, 12, C_LINE);
+  ellipse(s, scale, 20, 23, 13, 11, C_SHELL);
+  ellipse(s, scale, 20, 30, 10, 3, C_SHADE);
   ellipse(s, scale, 15, 13, 3, 1, C_LIGHT);
 
-  /* Stubble along the chin. */
+  /* Stubble along the chin and up the jaw. */
 
-  rect(s, scale, 14, 30, 1, 1, C_LINE);
-  rect(s, scale, 16, 31, 1, 1, C_LINE);
-  rect(s, scale, 18, 32, 1, 1, C_LINE);
-  rect(s, scale, 20, 32, 1, 1, C_LINE);
-  rect(s, scale, 22, 32, 1, 1, C_LINE);
-  rect(s, scale, 24, 31, 1, 1, C_LINE);
-  rect(s, scale, 26, 30, 1, 1, C_LINE);
+  rect(s, scale, 12, 29, 1, 1, C_INK);
+  rect(s, scale, 13, 31, 1, 1, C_INK);
+  rect(s, scale, 15, 32, 1, 1, C_INK);
+  rect(s, scale, 17, 33, 1, 1, C_INK);
+  rect(s, scale, 19, 33, 1, 1, C_INK);
+  rect(s, scale, 21, 33, 1, 1, C_INK);
+  rect(s, scale, 23, 33, 1, 1, C_INK);
+  rect(s, scale, 25, 32, 1, 1, C_INK);
+  rect(s, scale, 27, 31, 1, 1, C_INK);
+  rect(s, scale, 28, 29, 1, 1, C_INK);
+  rect(s, scale, 14, 30, 1, 1, C_SHADE);
+  rect(s, scale, 16, 31, 1, 1, C_SHADE);
+  rect(s, scale, 24, 31, 1, 1, C_SHADE);
+  rect(s, scale, 26, 30, 1, 1, C_SHADE);
 
-  /* Glasses: two frames, a bridge, and arms out to the shell's edge. */
+  /* Glasses: two thin frames, a bridge, and arms out to the shell's edge.
+   * The eyes sit inside them.
+   */
 
-  rect(s, scale, 10, 16, 9, 7, C_LINE);
-  rect(s, scale, 11, 17, 7, 5, C_SHELL);
-  rect(s, scale, 21, 16, 9, 7, C_LINE);
-  rect(s, scale, 22, 17, 7, 5, C_SHELL);
-  rect(s, scale, 19, 19, 2, 1, C_LINE);
-  rect(s, scale, 8, 18, 2, 1, C_LINE);
-  rect(s, scale, 30, 18, 2, 1, C_LINE);
+  rect(s, scale, 10, 17, 9, 6, C_INK);
+  rect(s, scale, 11, 18, 7, 4, C_SHELL);
+  rect(s, scale, 21, 17, 9, 6, C_INK);
+  rect(s, scale, 22, 18, 7, 4, C_SHELL);
+  rect(s, scale, 19, 19, 2, 1, C_INK);
+  rect(s, scale, 7, 19, 3, 1, C_INK);
+  rect(s, scale, 30, 19, 3, 1, C_INK);
 
   px = clampi(pose->pupil_x / (FACE_UNIT / 2 + 1), -1, 1);
   py = clampi(pose->pupil_y / (FACE_UNIT / 2 + 1), 0, 1);
@@ -248,39 +256,39 @@ void face_render_crab(const struct face_surface *s,
   eye(s, scale, 11, pose->eye_open_l, px, py);
   eye(s, scale, 22, pose->eye_open_r, px, py);
 
-  /* Brows above the frames, tilted by the biased brow.  The inner end drops
-   * as the brow lowers, and y grows downwards.
+  /* Brows: thick, and tilted by the biased brow.  The inner end drops as
+   * the brow lowers, and y grows downwards.
    */
 
-  brow_y = clampi(15 - (2 * brow) / FACE_UNIT, 13, 15);
+  brow_y = clampi(14 - (2 * brow) / FACE_UNIT, 12, 14);
 
   for (i = 0; i < 2; i++)
     {
       int inner = (i == 0) ? 1 : -1;
-      int x0 = (i == 0) ? 11 : 22;
+      int x0 = (i == 0) ? 10 : 22;
       int k;
 
-      for (k = 0; k < 7; k++)
+      for (k = 0; k < 8; k++)
         {
-          int tilt = -((k - 3) * inner * brow * 2) / (3 * FACE_UNIT);
+          int tilt = -((2 * k - 7) * inner * brow) / (2 * FACE_UNIT);
 
-          rect(s, scale, x0 + k, brow_y + tilt, 1, 2, C_LINE);
+          rect(s, scale, x0 + k, brow_y + tilt, 1, 2, C_INK);
         }
     }
 
-  /* A crease between the brows when they are down. */
+  /* Creases between the brows when they are down. */
 
   if (brow < -FACE_UNIT / 2)
     {
-      rect(s, scale, 19, 15, 1, 2, C_SHADE);
-      rect(s, scale, 20, 15, 1, 2, C_SHADE);
+      rect(s, scale, 18, 13, 1, 3, C_SHADE);
+      rect(s, scale, 21, 13, 1, 3, C_SHADE);
     }
 
-  /* Mouth.  A frown also opens it, twice over, so anger is a shout with
-   * teeth rather than a pursed line.
+  /* Mouth.  Never quite shut, and a frown opens it further, so anger is a
+   * shout with teeth rather than a pursed line.
    */
 
-  open = pose->mouth_open;
+  open = pose->mouth_open + MOUTH_BIAS;
   if (pose->mouth_curve < 0)
     {
       open -= 2 * pose->mouth_curve;
@@ -288,13 +296,13 @@ void face_render_crab(const struct face_surface *s,
 
   open = clampi(open, 0, FACE_UNIT);
 
-  for (dx = -5; dx <= 5; dx++)
+  for (dx = -6; dx <= 6; dx++)
     {
-      int32_t norm  = ((int32_t)dx * FACE_UNIT) / 5;
+      int32_t norm  = ((int32_t)dx * FACE_UNIT) / 6;
       int32_t bulge = FACE_UNIT - (norm * norm) / FACE_UNIT;
       int yc = 28 + (int)(((int32_t)pose->mouth_curve * 2 * bulge)
                           / (FACE_UNIT * (int32_t)FACE_UNIT));
-      int hc = (int)(((int32_t)open * 5 * (FACE_UNIT / 2 + bulge / 2))
+      int hc = (int)(((int32_t)open * 6 * (FACE_UNIT / 3 + 2 * bulge / 3))
                      / (FACE_UNIT * (int32_t)FACE_UNIT));
       int top;
 
@@ -304,13 +312,13 @@ void face_render_crab(const struct face_surface *s,
         }
 
       top = yc - hc / 2;
-      rect(s, scale, 20 + dx, top - 1, 1, hc + 2, C_LINE);
+      rect(s, scale, 20 + dx, top - 1, 1, hc + 2, C_INK);
 
       if (hc >= 3)
         {
           rect(s, scale, 20 + dx, top, 1, hc, C_MOUTH);
 
-          if (dx >= -3 && dx <= 3)
+          if (dx >= -4 && dx <= 4)
             {
               rect(s, scale, 20 + dx, top, 1, 1, C_TEETH);
             }

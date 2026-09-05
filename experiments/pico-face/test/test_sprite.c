@@ -263,8 +263,8 @@ static void test_pixel_brow_tilts_the_right_way(void)
 #define CRAB(n) ((n) * 6 + 3)
 
 /* Same sign check for the crab.  Its mouth is centred on cell 20 and runs
- * from cell 15 to 25, and its outline is the only near black in those
- * columns between the glasses and the stubble.
+ * from cell 14 to 26, and its ink is the only near black in those columns
+ * between the glasses and the stubble.
  */
 
 static void test_crab_smile_points_the_right_way(void)
@@ -283,14 +283,14 @@ static void test_crab_smile_points_the_right_way(void)
 
   face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
 
-  /* The outline colour is read back from a glasses frame cell, so the test
-   * does not have to know the crab's palette.
+  /* The ink colour is read back from a glasses frame cell, so the test does
+   * not have to know the crab's palette.
    */
 
-  line = g_pixels[(size_t)CRAB(16) * PANEL + (size_t)CRAB(10)];
+  line = g_pixels[(size_t)CRAB(17) * PANEL + (size_t)CRAB(10)];
 
-  mid = first_row_of(&surf, CRAB(20), CRAB(24), CRAB(32), line);
-  end = first_row_of(&surf, CRAB(15), CRAB(24), CRAB(32), line);
+  mid = first_row_of(&surf, CRAB(20), CRAB(24), CRAB(33), line);
+  end = first_row_of(&surf, CRAB(15), CRAB(24), CRAB(33), line);
   check(mid > 0 && end > 0, "the crab mouth drew something");
   check(mid > end, "a crab smile dips in the middle");
 }
@@ -313,12 +313,12 @@ static void test_crab_is_angrier_than_the_pose(void)
   p.eye_open_r = FACE_UNIT;
 
   face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
-  line = g_pixels[(size_t)CRAB(16) * PANEL + (size_t)CRAB(10)];
+  line = g_pixels[(size_t)CRAB(17) * PANEL + (size_t)CRAB(10)];
 
-  /* Left brow, cells 11 to 17, above the frame's top edge at cell 16. */
+  /* Left brow, cells 10 to 17, above the frame's top edge at cell 17. */
 
-  outer = first_row_of(&surf, CRAB(11), CRAB(10), CRAB(16), line);
-  inner = first_row_of(&surf, CRAB(17), CRAB(10), CRAB(16), line);
+  outer = first_row_of(&surf, CRAB(10), CRAB(9), CRAB(17), line);
+  inner = first_row_of(&surf, CRAB(17), CRAB(9), CRAB(17), line);
   check(outer > 0 && inner > 0, "the crab drew both brow ends");
   check(inner > outer, "a resting crab lowers its inner brow ends");
 }
@@ -393,6 +393,59 @@ static void test_penguin_sways(void)
         "the penguin moves between two moments of the sway");
 }
 
+/* The graph shows the current state in one colour and every other state in
+ * another, and the same two colours whichever state is current.
+ */
+
+static void test_graph_marks_the_current_state(void)
+{
+  struct face_surface surf = panel();
+  struct face_dirty dirty;
+  struct face_pose p;
+  uint16_t current = 0;
+  uint16_t other = 0;
+  int s;
+
+  memset(&p, 0, sizeof(p));
+
+  for (s = 0; s < FACE_NSTATES; s++)
+    {
+      int x;
+      int y;
+      int o;
+
+      face_render_graph(&surf, &p, (enum face_state)s, 0, 0, &dirty);
+
+      face_graph_node(s, PANEL, PANEL, &x, &y);
+      if (s == 0)
+        {
+          current = g_pixels[(size_t)y * PANEL + (size_t)x];
+        }
+
+      check(g_pixels[(size_t)y * PANEL + (size_t)x] == current,
+            "the current node is the current colour");
+
+      for (o = 0; o < FACE_NSTATES; o++)
+        {
+          if (o == s)
+            {
+              continue;
+            }
+
+          face_graph_node(o, PANEL, PANEL, &x, &y);
+          if (other == 0)
+            {
+              other = g_pixels[(size_t)y * PANEL + (size_t)x];
+            }
+
+          check(g_pixels[(size_t)y * PANEL + (size_t)x] == other,
+                "an other node is the other colour");
+        }
+    }
+
+  check(current != other, "the two colours differ");
+}
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -409,6 +462,7 @@ int main(void)
   test_crab_is_angrier_than_the_pose();
   test_penguin_beak_opens();
   test_penguin_sways();
+  test_graph_marks_the_current_state();
 
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

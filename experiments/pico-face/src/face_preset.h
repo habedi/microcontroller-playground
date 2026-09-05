@@ -20,7 +20,8 @@
 
 /* A renderer gets the pose, and also the state and the clock, so a preset
  * that wants to key an animation off either can.  The penguin sways on the
- * clock; the others take everything from the pose.
+ * clock, the graph highlights the state, and the others take everything
+ * from the pose.
  */
 
 typedef void (*face_render_fn)(const struct face_surface *s,
@@ -58,6 +59,17 @@ void face_render_penguin(const struct face_surface *s,
                          const struct face_pose *pose,
                          enum face_state state, uint32_t now_ms, int palette,
                          struct face_dirty *dirty);
+
+void face_render_graph(const struct face_surface *s,
+                       const struct face_pose *pose,
+                       enum face_state state, uint32_t now_ms, int palette,
+                       struct face_dirty *dirty);
+
+/* Where the graph preset puts the node for a state on a panel of the given
+ * size.  Exposed so a test can look at the right pixel.
+ */
+
+void face_graph_node(int index, int width, int height, int *x, int *y);
 
 /* How many presets there are, and one of them by index.  An index outside
  * the table wraps, so the caller can add or subtract one without checking.
