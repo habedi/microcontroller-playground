@@ -106,12 +106,6 @@ def push() -> None:
     try:
         import importlib.util
 
-        with open(SPOOL, encoding="utf-8") as spooled:
-            word = spooled.read().strip()
-
-        if not word:
-            return
-
         here = os.path.dirname(os.path.abspath(__file__))
         spec = importlib.util.spec_from_file_location(
             "board_mcp", os.path.join(here, "board-mcp.py")
@@ -122,9 +116,21 @@ def push() -> None:
         if not os.path.exists(board.PORT):
             return
 
-        # face() starts the render loop when it is not running, which is what
-        # makes the first event of a session do something visible.
-        board.face(word)
+        # A hook that fired while this copy held the lock gave up and left
+        # its word in the spool file, so keep going until the word read
+        # before a push is still the word there after it.
+        sent = None
+        while True:
+            with open(SPOOL, encoding="utf-8") as spooled:
+                word = spooled.read().strip()
+
+            if not word or word == sent:
+                return
+
+            # face() starts the render loop when it is not running, which is
+            # what makes the first event of a session do something visible.
+            board.face(word)
+            sent = word
     finally:
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()

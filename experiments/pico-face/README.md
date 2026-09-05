@@ -11,7 +11,8 @@ OS: Apache NuttX, configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wif
 ### Status
 
 Working. The host tests pass, the image builds, and the face runs on the panel
-with all six expressions reachable.
+with all six expressions reachable in any of three presets, which the panel's
+own joystick moves between.
 
 Measured on the board:
 
@@ -21,11 +22,15 @@ Measured on the board:
 - 15.7 percent of one core for the render loop at 30 frames per second, with
   the whole panel redrawn every frame.
 - 4 KB of stack, unchanged from the default.
-- 7 KB of flash added to the image.
+- 7 KB of flash for the original vector face, and 10.5 KB more for the two
+  pixel presets, the overlay font, and the controls.
+- Around 16 percent of one core in every preset, so the sprite blit and the
+  vector drawing cost about the same. The bus is the limit, not the drawing.
 
 ### How It Is Put Together
 
-Three pieces, each testable on its own:
+The parts that need a board are kept apart from the parts that do not, so
+most of it is testable on the host:
 
 - `src/face.c` is the expression state machine. Six states in, eight numbers
   out, blended over 220 ms so a change never snaps. No board code and no
@@ -37,13 +42,24 @@ Three pieces, each testable on its own:
   Shapes are rounded rectangles and a tapered parabola, so an expression costs
   a handful of numbers rather than a 115 KB bitmap, and blending two
   expressions is interpolation. It knows nothing about NuttX.
+- `src/face_preset.c` holds the table of looks. A preset is a name and a
+  render function, and `face_render.c` is simply the first row in it.
+  `face_pixel.c` and `face_hero.c` are the other two, with the hero's art in
+  `face_hero_art.c` and the shared blit and palettes in `face_sprite.c`.
+- `src/face_input.c` turns a button mask into an action. It is a pure function
+  of the current and previous masks, with no board code, so the edge detection
+  is tested on the host.
+- `src/face_overlay.c` and `src/face_font.c` draw the debug overlay.
 - `src/face_main.c` is the only file that touches the board. It opens
-  `/dev/fb0`, runs the render loop at about 30 frames per second, and reads the
-  current state out of a file.
+  `/dev/fb0`, runs the render loop at about 30 frames per second, reads the
+  current state out of a file, and reads `/dev/buttons`.
 
-Drawing procedurally rather than from bitmaps is what makes the whole thing
-fit. One 240x240 frame is 115,200 bytes, so a bitmap for each of six
-expressions would be most of the flash and could not blend between them.
+Nothing here stores a full frame. One 240x240 frame is 115,200 bytes, so a
+bitmap for each expression in each preset would be most of the flash. The
+vector and pixel presets draw from shapes instead, which also lets them blend
+between expressions. The hero preset does use bitmaps, but they are 32 by 32
+and indexed to a 16 entry palette, then scaled up on the way to the panel, so
+a pose costs about a kilobyte rather than a hundred.
 
 ### Host Tests
 
@@ -71,8 +87,11 @@ earned their place by catching real bugs:
 make -C experiments/pico-face/tools preview
 ```
 
-That writes `tools/build/faces.png`, a contact sheet of all six expressions.
-Pass `WHEN=<milliseconds>` to sample the animation at a different moment.
+That writes `tools/build/faces.png`, a contact sheet with one row per preset
+and one column per expression. Pass `WHEN=<milliseconds>` to sample the
+animation at a different moment, and `PALETTE=<0 to 2>` to see the other colour
+sets. This is where the art is worth judging, since a round here costs nothing
+and a round on the board costs a BOOTSEL press.
 
 ### Build and Flash
 
@@ -112,6 +131,61 @@ render loop polls, so anything that can write that file can drive the face.
 The six words are `idle`, `working`, `editing`, `waiting`, `failed`, and
 `done`. An unknown word is rejected where it is typed rather than ignored by
 the render loop.
+
+### Presets
+
+A preset is a name and a render function in `src/face_preset.c`, so adding a
+look is one new file and one new row. All three share the expression state
+machine in `face.c`, which means the hook drives whichever one is showing
+without knowing anything about it.
+
+| Preset | What it draws |
+| --- | --- |
+| `vector` | The original amber face, drawn from shapes. |
+| `pixel` | A pixel portrait bust on a 48 by 48 grid, five panel pixels per art pixel. |
+| `hero` | A 32 by 32 character sprite, one pose per expression. |
+
+The first two take their whole shape from `struct face_pose`, so blinks and
+pupil drift work in both. The hero picks its pose from the state and the clock
+instead, because at 32 pixels an eyelid is one pixel and a blink would not
+read. Its idle motion is a one pixel bob of the whole sprite rather than a
+second frame, which animates it for no extra art.
+
+Sprite art lives in `src/face_hero_art.c` as rows of characters, one per pixel.
+A dot is transparent and a hex digit picks a palette entry, so the art is
+editable in a text editor and readable in a diff. `test_sprite.c` checks that
+every row is the declared width and holds only characters the palette can
+resolve, which is the failure this format invites: a short row shifts every
+pixel after it without breaking anything else.
+
+Palettes are held apart from the art, so all three colour sets work on every
+sprite and cycling them is nearly free.
+
+### Panel Controls
+
+The Waveshare Pico-LCD-1.3 has a five way joystick and four keys. The pinout
+and the patch that declares them are in `docs/raspberrypi-pico-2.md`.
+
+| Control | Action |
+| --- | --- |
+| Joystick left, right | Previous, next preset |
+| Joystick up, down | Brighter, dimmer |
+| Joystick press | Nothing yet |
+| A | Hold, which ignores the state file |
+| B | Next palette |
+| X | Next animation speed |
+| Y | Debug overlay |
+
+Hold is worth knowing about. The hook rewrites `/tmp/face` on every tool call,
+so without it an expression chosen at the board is replaced within seconds.
+
+The face runs without any of this. If `/dev/buttons` is missing, because the
+build has no button support or the driver did not register, it says so once
+and carries on reading the state file.
+
+The mapping itself is a pure function of the current and previous button
+masks, in `face_input.c`, so the edge detection that stops a held button
+repeating is covered by `test_input.c` rather than by pressing buttons.
 
 ### Driving It from Claude Code
 
@@ -159,7 +233,10 @@ Two limits worth knowing:
 - The renderer redraws the whole panel every frame, which is where the 15.7
   percent goes. The dirty box is already in the interface, and a blink touches
   two small rectangles, so partial redraw should cut this by most of itself.
-- No brow shape change between expressions, only vertical position. Angling the
-  brows would carry more of the expression than anything else left on this list.
-- The four buttons and the joystick on the hat are unused. They are plain GPIO
-  and want a `djoystick` driver.
+- The vector preset still changes brow position only, not brow shape. The pixel
+  portrait angles its brows and carries the expression better for it, so the
+  same treatment is the obvious next change to the vector look.
+- Brightness dims the rendered pixels rather than the backlight. The backlight
+  pad is a plain GPIO in the board glue and only knows on and off, so real
+  dimming means moving that pin to `RP23XX_PWM`.
+- The joystick press is read but unbound.

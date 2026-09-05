@@ -315,10 +315,52 @@ D/C reuses the SPI1 RX pad. The panel bus is write-only, so RX is free, and `rp2
 `common/src/rp23xx_spi.c` already drives `CONFIG_RP23XX_SPI1_RX_GPIO` for exactly this. That option has to stay
 at its default of 8.
 
+### Controls
+
+The panel carries a five way joystick and four keys. They are plain GPIO pads that short to ground, so each pad
+needs its pull-up on and a pressed control reads low. The board configured the pads with no pull-up at all, which
+left an unpressed input floating and reading as noise, so the patch turns them on.
+
+`patches/nuttx/0006-raspberrypi-pico-2-lcd13-buttons.patch` declares the nine controls, fixes the pull-ups, and
+has the board select `ARCH_HAVE_BUTTONS` and `ARCH_HAVE_IRQBUTTONS`. Without those two selects `CONFIG_ARCH_BUTTONS`
+cannot be set at all, since it depends on them. The patch also adds the `nuttx/input/buttons.h` include that
+`rp23xx_bringup.c` was missing: it called `btn_lower_initialize()` without it, which failed the build the first
+time `CONFIG_INPUT_BUTTONS` was enabled on this board.
+
+With `CONFIG_INPUT_BUTTONS` the bringup registers `/dev/buttons`, and a read returns one bit per control.
+
+| Control | GPIO | Bit |
+| --- | --- | --- |
+| Joystick up | 2 | 0 |
+| Joystick down | 18 | 1 |
+| Joystick left | 16 | 2 |
+| Joystick right | 20 | 3 |
+| Joystick press | 3 | 4 |
+| Key A | 15 | 5 |
+| Key B | 17 | 6 |
+| Key X | 19 | 7 |
+| Key Y | 21 | 8 |
+
+None of these clash with the panel, which uses GPIO 8 to 13, or with the wireless chip, which uses 23 to 25 and
+29. The bit order follows the `BUTTON_` definitions in the board's `board.h` rather than the GPIO numbers, so a
+reader that cares about the order has to follow that file.
+
+The mapping was settled by using the controls and watching what they did, not by a clean scan.
+`apps/examples/buttons` reported eight distinct bits for nine presses, and it is a poor tool for the job: it
+stops printing after a handful of samples while its daemon stays alive and goes on consuming the events, so a
+second capture returns nothing. Which of the nine went unreported was never established. If a single control
+misbehaves later, that missing press is the first thing to re-check.
+
+### Stopping a Task
+
+`kill` does not stop a task in these configurations. `CONFIG_SIG_DEFAULT` is off, so there is no default action
+for `SIGKILL` and the target ignores it, `kill -9` included. A long running application needs its own way out.
+The face reads the word `quit` from its state file for exactly this reason.
+
 ### Not Done Yet
 
-The joystick and four buttons. They are plain GPIO and need their own setup. The panel is 240 pixels wide while
-NES output is 256 and SNES is 256, so an emulator would have to crop or scale horizontally.
+The panel is 240 pixels wide while NES output is 256 and SNES is 256, so an emulator would have to crop or scale
+horizontally.
 
 ### Cold Boot Is Intermittent
 

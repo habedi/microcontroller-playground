@@ -95,7 +95,7 @@ static uint32_t now_ms(void)
   struct timespec ts;
 
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+  return (uint32_t)ts.tv_sec * 1000u + (uint32_t)(ts.tv_nsec / 1000000);
 }
 
 /* Reads the state word out of the file.  A missing file is not an error: it
@@ -268,9 +268,7 @@ static void dim_surface(const struct face_surface *s, int percent)
     }
 }
 
-/* Applies one button action.  Returns true when the caller should redraw
- * even though nothing else changed.
- */
+/* Applies one button action to the settings. */
 
 static void apply(struct ui *ui, enum face_action action)
 {
@@ -410,11 +408,17 @@ static int run(void)
   printf("face: %dx%d, state from %s, %d presets\n", surface.width,
          surface.height, CONFIG_PICO_FACE_STATE_FILE, face_preset_count());
 
-  face_init(&f, now_ms());
+  /* The face is ticked on the animation clock below, so it has to start on
+   * that clock too.  Starting it on the real clock leaves it waiting for the
+   * animation clock to catch up, which is a frozen face for as long as the
+   * board had been up.
+   */
+
+  anim_ms   = 0;
+  face_init(&f, anim_ms);
   last_poll = now_ms();
   last_real = last_poll;
   fps_mark  = last_poll;
-  anim_ms   = 0;
 
   while (!quit)
     {
@@ -443,7 +447,12 @@ static int run(void)
                 }
             }
 
-          if (!ui.hold && read_state(&wanted, &quit) && wanted != f.state)
+          /* Hold ignores the expression in the file, not the quit word.
+           * Nothing else can stop the loop, since kill does not work in
+           * this configuration.
+           */
+
+          if (read_state(&wanted, &quit) && !ui.hold && wanted != f.state)
             {
               face_set_state(&f, wanted, anim_ms);
             }
@@ -481,6 +490,13 @@ static int run(void)
     }
 
   close(fd);
+
+  /* Leave no quit word behind, or the next face & would read it on its
+   * first poll and stop again.
+   */
+
+  unlink(CONFIG_PICO_FACE_STATE_FILE);
+
   printf("face: stopped\n");
   return 0;
 }
