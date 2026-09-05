@@ -2,8 +2,9 @@
  * experiments/pico-face/src/face_overlay.c
  *
  * The debug overlay, and the text drawing it needs.  Shows which preset and
- * palette are up, which expression is showing, the measured frame rate, and
- * whether the state file is being ignored.
+ * palette are up, which expression is showing, the measured frame rate, how
+ * much of the panel is being sent per frame, and whether the state file is
+ * being ignored.
  *
  ****************************************************************************/
 
@@ -137,12 +138,13 @@ void face_text(const struct face_surface *s, int x, int y, int scale,
 void face_overlay(const struct face_surface *s,
                   const struct face_palette *pal,
                   const char *preset, const char *palette_name,
-                  const char *state, unsigned int fps, int hold, int speed)
+                  const char *state, unsigned int fps, unsigned int bus,
+                  int hold, int speed)
 {
   char buf[16];
   char *p;
   int line = FACE_FONT_H * SCALE + 3;
-  int rows = hold ? 5 : 4;
+  int rows = hold ? 6 : 5;
   int y = 4;
 
   /* A band behind the text, so it stays readable over pale art. */
@@ -164,6 +166,12 @@ void face_overlay(const struct face_surface *s,
   p = utoa_end((unsigned int)speed, buf + sizeof(buf));
   face_text(s, 4, y, SCALE, pal->colour[14], "SPD");
   face_text(s, 4 + 4 * ADVANCE, y, SCALE, pal->colour[14], p);
+  y += line;
+
+  p = utoa_end(bus, buf + sizeof(buf));
+  face_text(s, 4, y, SCALE, pal->colour[14], "BUS");
+  face_text(s, 4 + 4 * ADVANCE, y, SCALE, pal->colour[14], p);
+  face_text(s, 4 + 7 * ADVANCE, y, SCALE, pal->colour[14], "%");
   y += line;
 
   if (hold)

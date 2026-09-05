@@ -20,7 +20,7 @@ MODULE    = $(CONFIG_PICO_FACE)
 CSRCS   = src/face.c src/face_render.c src/face_sprite.c \
           src/face_pixel.c src/face_crab.c \
           src/face_preset.c src/face_input.c src/face_font.c \
-          src/face_overlay.c
+          src/face_overlay.c src/face_dirty.c
 MAINSRC = src/face_main.c
 
 CFLAGS += -I$(APPDIR)/external/src

@@ -16,11 +16,12 @@ SRC   = ../src
 .PHONY: test clean
 
 test: $(BUILD)/test_face $(BUILD)/test_render $(BUILD)/test_sprite \
-      $(BUILD)/test_input
+      $(BUILD)/test_input $(BUILD)/test_dirty
 	$(BUILD)/test_face
 	$(BUILD)/test_render
 	$(BUILD)/test_sprite
 	$(BUILD)/test_input
+	$(BUILD)/test_dirty
 
 $(BUILD)/test_face: test_face.c $(SRC)/face.c $(SRC)/face.h | $(BUILD)
 	$(CC) $(CFLAGS) $(SANFLAGS) -o $@ test_face.c $(SRC)/face.c $(LDFLAGS)
@@ -43,6 +44,11 @@ $(BUILD)/test_sprite: test_sprite.c $(PRESET_SRCS) | $(BUILD)
 $(BUILD)/test_input: test_input.c $(SRC)/face_input.c $(SRC)/face_input.h \
                      | $(BUILD)
 	$(CC) $(CFLAGS) $(SANFLAGS) -o $@ test_input.c $(SRC)/face_input.c \
+	  $(LDFLAGS)
+
+$(BUILD)/test_dirty: test_dirty.c $(SRC)/face_dirty.c $(SRC)/face_dirty.h \
+                     | $(BUILD)
+	$(CC) $(CFLAGS) $(SANFLAGS) -o $@ test_dirty.c $(SRC)/face_dirty.c \
 	  $(LDFLAGS)
 
 $(BUILD):

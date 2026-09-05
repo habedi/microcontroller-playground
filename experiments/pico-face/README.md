@@ -14,18 +14,37 @@ Working. The host tests pass, the image builds, and the face runs on the panel
 with all six expressions reachable in any of three presets, which the panel's
 own joystick moves between.
 
-Measured on the board:
+Measured on the board with `face -b`, which times the parts of a frame
+separately on the vector preset:
 
-- 60 frames per second at 240x240 from `face -b`, which is 16.7 ms per frame
-  against 14.4 ms of unavoidable SPI time at the 64 MHz clock. So the drawing
-  itself costs about 2 ms and the bus is the limit.
-- 15.7 percent of one core for the render loop at 30 frames per second, with
-  the whole panel redrawn every frame.
-- 4 KB of stack, unchanged from the default.
-- 7 KB of flash for the original vector face, and 10.5 KB more for the two
-  pixel presets, the overlay font, and the controls.
-- Around 16 percent of one core in every preset, so the sprite blit and the
-  vector drawing cost about the same. The bus is the limit, not the drawing.
+| Part | Per frame |
+| --- | --- |
+| Drawing the whole surface | 3.4 ms |
+| Scanning it for changes | 2.9 ms |
+| Pushing all of it over SPI | 13.5 ms |
+
+So a full redraw allows 59 frames per second and the bus is its limit, at
+14.4 ms of unavoidable SPI time for 115 KB at 64 MHz. With partial redraw the
+bus leaves the equation and the ceiling is about 158 frames per second.
+
+The render loop takes about 20 percent of one core, measured with `ps` in
+every state, and the same in states that send almost nothing as in states
+that send half the panel. The push is a DMA transfer the task sleeps
+through, so it never was CPU time, and the 15.7 percent an earlier version
+of these notes attributed to the bus was the drawing. Partial redraw added
+the scan to that. What it bought is the bus: it is nearly idle, a frame
+reaches the panel a few milliseconds after it is drawn rather than 14, and
+the frame rate could triple. The loop sleeps 33 ms after each frame, so it
+runs at about 25 frames per second rather than 30.
+
+One reading of 33 percent was seen once, on a loop started right after the
+benchmark, and could not be reproduced. Every later loop started the same way
+read 20 percent.
+
+Other numbers: 4 KB of stack, unchanged from the default, and 4 KB of static
+RAM for the change tracker. The vector face costs 7 KB of flash, and the two
+pixel presets, the overlay font, the controls, and the tracker about 11 KB
+more.
 
 ### How It Is Put Together
 
@@ -49,6 +68,11 @@ most of it is testable on the host:
 - `src/face_input.c` turns a button mask into an action. It is a pure function
   of the current and previous masks, with no board code, so the edge detection
   is tested on the host.
+- `src/face_dirty.c` finds what changed between one frame and the next. It
+  keeps a hash per row and per column of the last frame that was pushed, and
+  the changed rows and columns bound the changed area. That box can be looser
+  than the true change, since two blinking eyes become one wide box, but it
+  is never tighter, and it costs 4 KB rather than a second copy of the frame.
 - `src/face_overlay.c` and `src/face_font.c` draw the debug overlay.
 - `src/face_main.c` is the only file that touches the board. It opens
   `/dev/fb0`, runs the render loop at about 30 frames per second, reads the
@@ -85,6 +109,36 @@ pixel portrait turned out to have the same two signs backwards:
   The pixel portrait had this and the smile inverted, so `waiting` looked
   angry, `failed` smiled, and `done` frowned, and the contact sheet below is
   where it showed.
+
+### Partial Redraw
+
+Every preset still redraws the whole surface, because the drawing is cheap:
+about 2 ms of the 16.7 ms frame. Sending it is what costs, 14.4 ms of SPI
+time for a full frame at 64 MHz. So the render loop compares each finished
+frame with the last one it pushed and sends only the bounding box of the
+difference, and skips the push entirely when nothing changed.
+
+The tracker runs on the finished frame, after the overlay and the dimming,
+so it covers everything, and it is the same code on the host and the board.
+`make -C tools stats` runs it over ten seconds of each state at 30 frames per
+second and prints the share of the panel sent per frame:
+
+```
+preset       idle  working  editing  waiting   failed     done
+vector         4%      38%       0%      46%       0%       7%
+pixel          0%       0%       0%       0%       0%       0%
+crab           0%       0%       0%       0%       0%       0%
+```
+
+The vector face in `working` and `waiting` is the exception. Its glow pulses
+the background colour, and a background step is a whole frame. That is the
+designed effect for `waiting`, meant to catch the eye from across the room,
+so it is left alone. The other two presets have a fixed background and only
+ever send the eyes and the mouth.
+
+The overlay shows the measured share on the board as `BUS`, next to `FPS`.
+The scan reads two pixels per word, so the box's sides land on even pixels,
+and it costs 2.9 ms a frame, which is what the CPU figures above include.
 
 ### Looking at It Without Flashing
 
@@ -239,9 +293,10 @@ Two limits worth knowing:
 
 ### Not Done Yet
 
-- The renderer redraws the whole panel every frame, which is where the 15.7
-  percent goes. The dirty box is already in the interface, and a blink touches
-  two small rectangles, so partial redraw should cut this by most of itself.
+- The change tracker reports one box. Two blinking eyes become a band the
+  width of the face, and a blink plus a mouth change becomes most of the
+  panel. Two boxes, or a box per eye, would cut the last part of the bus
+  time, at the cost of a second update call per frame.
 - The vector preset's brows tilt but its mouth does not change shape beyond
   its curve, so `waiting` and `working` differ mostly in the eyes.
 - Brightness dims the rendered pixels rather than the backlight. The backlight

@@ -23,6 +23,7 @@
 
 #include <nuttx/video/fb.h>
 
+#include "face_dirty.h"
 #include "face_input.h"
 #include "face_overlay.h"
 #include "face_preset.h"
@@ -85,6 +86,16 @@ struct ui
   bool hold;      /* ignore the state file */
   bool overlay;
 };
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* Hashes of the last pushed frame.  Static rather than on the stack, since
+ * the task has 4 KB of stack and this is nearly 4 KB on its own.
+ */
+
+static struct face_tracker g_tracker;
 
 /****************************************************************************
  * Private Functions
@@ -226,6 +237,11 @@ static void push(int fd, const struct face_dirty *dirty)
 #ifdef CONFIG_FB_UPDATE
   struct fb_area_s area;
 
+  if (dirty->w <= 0 || dirty->h <= 0)
+    {
+      return;
+    }
+
   area.x = (fb_coord_t)dirty->x;
   area.y = (fb_coord_t)dirty->y;
   area.w = (fb_coord_t)dirty->w;
@@ -319,9 +335,16 @@ static void apply(struct ui *ui, enum face_action action)
     }
 }
 
-/* Draws as fast as the panel allows and reports the rate.  This is the number
- * that decides whether any animated idea on top of this is possible.
+/* Times the three parts of a frame apart from each other: drawing the whole
+ * surface, scanning it for changes, and pushing all of it over the bus.
+ * Per frame, in tenths of a millisecond, so the sum says what a full redraw
+ * costs and the first two say what a frame costs once the bus is out of it.
  */
+
+static uint32_t tenths(uint32_t elapsed_ms)
+{
+  return (elapsed_ms * 10u + BENCH_FRAMES / 2) / BENCH_FRAMES;
+}
 
 static int benchmark(void)
 {
@@ -329,7 +352,9 @@ static int benchmark(void)
   struct face_dirty dirty;
   struct face f;
   uint32_t start;
-  uint32_t elapsed;
+  uint32_t draw;
+  uint32_t scan;
+  uint32_t full;
   int fd;
   int i;
 
@@ -339,27 +364,46 @@ static int benchmark(void)
     }
 
   face_init(&f, now_ms());
-  start = now_ms();
 
+  start = now_ms();
   for (i = 0; i < BENCH_FRAMES; i++)
     {
       face_tick(&f, now_ms());
       face_preset(0)->render(&surface, &f.pose, f.state, now_ms(), 0, &dirty);
+    }
+
+  draw = now_ms() - start;
+
+  face_tracker_reset(&g_tracker);
+  start = now_ms();
+  for (i = 0; i < BENCH_FRAMES; i++)
+    {
+      face_tracker_scan(&g_tracker, &surface, &dirty);
+    }
+
+  scan = now_ms() - start;
+
+  dirty.x = 0;
+  dirty.y = 0;
+  dirty.w = surface.width;
+  dirty.h = surface.height;
+  start = now_ms();
+  for (i = 0; i < BENCH_FRAMES; i++)
+    {
       push(fd, &dirty);
     }
 
-  elapsed = now_ms() - start;
+  full = now_ms() - start;
   close(fd);
 
-  if (elapsed == 0)
-    {
-      elapsed = 1;
-    }
-
-  printf("face: %d frames of %dx%d in %lu ms, %lu fps\n",
-         BENCH_FRAMES, surface.width, surface.height,
-         (unsigned long)elapsed,
-         (unsigned long)((BENCH_FRAMES * 1000u) / elapsed));
+  printf("face: %dx%d, %d frames each, per frame in 0.1 ms:\n",
+         surface.width, surface.height, BENCH_FRAMES);
+  printf("face:   draw %lu   scan %lu   full push %lu\n",
+         (unsigned long)tenths(draw), (unsigned long)tenths(scan),
+         (unsigned long)tenths(full));
+  printf("face: full redraw %lu fps, partial redraw ceiling %lu fps\n",
+         (unsigned long)((BENCH_FRAMES * 1000u) / (draw + full + 1)),
+         (unsigned long)((BENCH_FRAMES * 1000u) / (draw + scan + 1)));
 
   return 0;
 }
@@ -377,6 +421,8 @@ static int run(void)
   uint32_t fps_mark;
   unsigned int frames = 0;
   unsigned int fps = 0;
+  uint32_t pushed = 0;     /* pixels sent to the panel since fps_mark */
+  unsigned int bus = 100;  /* percent of a full frame per frame, last second */
   uint32_t buttons = 0;
   bool quit = false;
   int btnfd;
@@ -427,6 +473,7 @@ static int run(void)
 
   anim_ms   = 0;
   face_init(&f, anim_ms);
+  face_tracker_reset(&g_tracker);
   last_poll = now_ms();
   last_real = last_poll;
   fps_mark  = last_poll;
@@ -477,18 +524,30 @@ static int run(void)
         {
           face_overlay(&surface, face_palette(ui.palette), preset->name,
                        face_palette(ui.palette)->name,
-                       face_state_name(f.state), fps, ui.hold,
+                       face_state_name(f.state), fps, bus, ui.hold,
                        g_speeds[ui.speed]);
         }
 
       dim_surface(&surface, ui.bright);
+
+      /* The preset reports the whole panel as dirty.  What actually changed
+       * is usually far less, and the bus is the bottleneck, so the frame is
+       * compared with the last one and only the difference is sent.
+       */
+
+      face_tracker_scan(&g_tracker, &surface, &dirty);
       push(fd, &dirty);
+      pushed += (uint32_t)dirty.w * (uint32_t)dirty.h;
 
       frames++;
       if (t - fps_mark >= 1000)
         {
+          uint32_t full = (uint32_t)surface.width * (uint32_t)surface.height;
+
           fps = frames;
+          bus = (unsigned int)((pushed * 100u) / (full * frames));
           frames = 0;
+          pushed = 0;
           fps_mark = t;
         }
 
