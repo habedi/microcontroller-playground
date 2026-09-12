@@ -65,6 +65,11 @@ void face_render_graph(const struct face_surface *s,
                        enum face_state state, uint32_t now_ms, int palette,
                        struct face_dirty *dirty);
 
+void face_render_bot(const struct face_surface *s,
+                     const struct face_pose *pose,
+                     enum face_state state, uint32_t now_ms, int palette,
+                     struct face_dirty *dirty);
+
 /* Where the graph preset puts the node for a state on a panel of the given
  * size.  Exposed so a test can look at the right pixel.
  */

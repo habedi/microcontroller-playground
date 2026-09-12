@@ -298,6 +298,10 @@ static void apply(struct ui *ui, enum face_action action)
         ui->preset = face_preset_wrap(ui->preset - 1);
         break;
 
+      case FACE_ACT_PRESET_RESET:
+        ui->preset = 0;
+        break;
+
       case FACE_ACT_BRIGHT_UP:
         ui->bright += BRIGHT_STEP;
         if (ui->bright > BRIGHT_MAX)

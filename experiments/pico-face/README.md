@@ -206,13 +206,14 @@ without knowing anything about it.
 
 | Preset | What it draws |
 | --- | --- |
-| `vector` | The original amber face, drawn from shapes. |
+| `vector` | The original amber face, drawn from shapes with an open mouth aperture on waiting and done. |
 | `pixel` | A pixel portrait bust on a 48 by 48 grid, five panel pixels per art pixel. |
-| `crab` | An angry crab whose shell is its face, after the well known drawing, on a 40 by 40 grid. |
-| `penguin` | A round penguin in a horned helmet and a bow tie, on the same grid. |
+| `crab` | An angry crab whose shell is its face, with typing claw animations and themed palettes, on a 40 by 40 grid. |
+| `penguin` | A round penguin in a horned helmet and a bow tie, with drooping failure animation and palettes, on the same grid. |
+| `bot` | Minimalist glowing robot eyes on an ink-black OLED-style ground, highly bus efficient. |
 | `graph` | The state machine as a diagram: six nodes on a ring, the current one red, the others orange. |
 
-The four faces take their shape from `struct face_pose`, so blinks and
+The five faces take their shape from `struct face_pose`, so blinks and
 pupil drift work in all of them. The graph is not a face. It draws the six
 states as nodes on a ring, joins every pair with a faint edge because the
 hook can move between any two, and shows the current state as a red node
@@ -221,15 +222,14 @@ orange. It is the one preset that says which state is showing in words, so
 it doubles as a check on the hook. The crab adds two biases of its own: its brows sit
 lower than the pose asks, so it is grumpy at rest and furious on `failed`,
 and its mouth is never quite shut, so its teeth show at rest and a frown
-opens it into a shout and lifts its claws. It sits on the white ground of
-the drawing rather than on the dark one the other presets use. The penguin
-has no brows, so the helmet stands in: it slides down over the eyes
-when the brows lower and lifts when they rise, the beak opens with the
-mouth, and the whole bird sways on a slow waddle driven by the clock, which
-is the one motion here that does not come from the pose. The crab and the
-penguin keep their own colours rather than using the palettes, because a
-purple crab is not the crab in the drawing. The pixel portrait follows the
-palette the B button picks.
+opens it into a shout and lifts its claws. It alternates its claws in a rapid
+typing rhythm when working, and supports classic, ocean, and retro terminal palettes.
+The penguin has no brows, so the helmet stands in: it slides down over the eyes
+when the brows lower, droops further over the eyes when failed, lifts when they rise,
+the beak opens with the mouth, and the whole bird sways on a slow waddle driven by
+the clock. The bot preset draws two pill-shaped glowing eyes on an ink-black ground,
+tilting on brows and curving into a smile on done, while sending almost nothing over
+the SPI bus.
 
 An earlier third preset was a 32 by 32 character sprite with one hand drawn
 pose per expression. It was dropped because the art did not read at this
@@ -247,7 +247,7 @@ and the patch that declares them are in `docs/raspberrypi-pico-2.md`.
 | --- | --- |
 | Joystick left, right | Previous, next preset |
 | Joystick up, down | Brighter, dimmer |
-| Joystick press | Nothing yet |
+| Joystick press | Reset to default preset |
 | A | Hold, which ignores the state file |
 | B | Next palette |
 | X | Next animation speed |
@@ -311,9 +311,6 @@ Two limits worth knowing:
   width of the face, and a blink plus a mouth change becomes most of the
   panel. Two boxes, or a box per eye, would cut the last part of the bus
   time, at the cost of a second update call per frame.
-- The vector preset's brows tilt but its mouth does not change shape beyond
-  its curve, so `waiting` and `working` differ mostly in the eyes.
 - Brightness dims the rendered pixels rather than the backlight. The backlight
   pad is a plain GPIO in the board glue and only knows on and off, so real
   dimming means moving that pin to `RP23XX_PWM`.
-- The joystick press is read but unbound.

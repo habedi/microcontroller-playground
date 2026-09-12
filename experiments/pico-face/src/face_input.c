@@ -32,6 +32,7 @@ static const struct binding g_bindings[] =
 {
   { FACE_BTN_LEFT,  FACE_ACT_PRESET_PREV },
   { FACE_BTN_RIGHT, FACE_ACT_PRESET_NEXT },
+  { FACE_BTN_PRESS, FACE_ACT_PRESET_RESET },
   { FACE_BTN_UP,    FACE_ACT_BRIGHT_UP },
   { FACE_BTN_DOWN,  FACE_ACT_BRIGHT_DOWN },
   { FACE_BTN_A,     FACE_ACT_HOLD },
@@ -70,10 +71,11 @@ const char *face_action_name(enum face_action action)
 {
   switch (action)
     {
-      case FACE_ACT_NONE:        return "none";
-      case FACE_ACT_PRESET_NEXT: return "preset next";
-      case FACE_ACT_PRESET_PREV: return "preset prev";
-      case FACE_ACT_BRIGHT_UP:   return "brighter";
+      case FACE_ACT_NONE:         return "none";
+      case FACE_ACT_PRESET_NEXT:  return "preset next";
+      case FACE_ACT_PRESET_PREV:  return "preset prev";
+      case FACE_ACT_PRESET_RESET: return "preset reset";
+      case FACE_ACT_BRIGHT_UP:    return "brighter";
       case FACE_ACT_BRIGHT_DOWN: return "dimmer";
       case FACE_ACT_HOLD:        return "hold";
       case FACE_ACT_PALETTE:     return "palette";

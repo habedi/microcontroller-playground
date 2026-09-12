@@ -434,15 +434,34 @@ void face_render(const struct face_surface *s, const struct face_pose *pose,
         }
     }
 
-  /* Mouth.  mouth_open sets how thick the band is, mouth_curve how much it
-   * smiles.
+  /* Mouth.  mouth_open sets how thick the band is or opens into an aperture,
+   * mouth_curve how much it smiles.
    */
 
-  parabola(s, s->width / 2, pct(s->height, MOUTH_CY_PCT),
-           pct(s->width, MOUTH_W_PCT),
-           pct(s->height, MOUTH_H_PCT) + (pose->mouth_open * pct(s->height, 6))
-           / FACE_UNIT,
-           (pose->mouth_curve * pct(s->height, 8)) / FACE_UNIT, trim);
+  {
+    int mouth_cx = s->width / 2;
+    int mouth_cy = pct(s->height, MOUTH_CY_PCT);
+    int mouth_w  = pct(s->width, MOUTH_W_PCT);
+    int curve_px = (pose->mouth_curve * pct(s->height, 8)) / FACE_UNIT;
+    int open_h   = (pose->mouth_open * pct(s->height, 10)) / FACE_UNIT;
+
+    if (open_h > 3)
+      {
+        int open_w = (mouth_w * (FACE_UNIT / 2 + pose->mouth_open / 2)) / FACE_UNIT;
+        round_rect(s, mouth_cx, mouth_cy + curve_px / 2, open_w, open_h,
+                   open_h / 2, trim);
+        if (open_h > 5 && open_w > 6)
+          {
+            round_rect(s, mouth_cx, mouth_cy + curve_px / 2, open_w - 4,
+                       open_h - 4, (open_h - 4) / 2, pupil);
+          }
+      }
+    else
+      {
+        parabola(s, mouth_cx, mouth_cy, mouth_w,
+                 pct(s->height, MOUTH_H_PCT) + open_h, curve_px, trim);
+      }
+  }
 
   if (dirty != NULL)
     {

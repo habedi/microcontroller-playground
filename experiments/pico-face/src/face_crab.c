@@ -33,20 +33,79 @@
 #define ANGER_BIAS 500
 #define MOUTH_BIAS 300
 
-/* Colours.  The crab keeps its own rather than using the shared palettes,
- * because a purple crab is not the crab in the drawing.
- */
+#define RGB(r, g, b) ((uint16_t)((((r) & 0xf8) << 8) | \
+                                 (((g) & 0xfc) << 3) | \
+                                 ((b) >> 3)))
 
-#define C_BG      face_rgb565(246, 246, 244)
-#define C_LINE    face_rgb565(150, 42, 4)
-#define C_INK     face_rgb565(18, 14, 14)
-#define C_SHELL   face_rgb565(242, 86, 22)
-#define C_SHADE   face_rgb565(204, 60, 10)
-#define C_LIGHT   face_rgb565(250, 132, 72)
-#define C_WHITE   face_rgb565(252, 250, 246)
-#define C_RIM     face_rgb565(200, 30, 26)
-#define C_TEETH   face_rgb565(232, 222, 170)
-#define C_MOUTH   face_rgb565(60, 12, 12)
+struct crab_colors
+{
+  uint16_t bg;
+  uint16_t line;
+  uint16_t ink;
+  uint16_t shell;
+  uint16_t shade;
+  uint16_t light;
+  uint16_t white;
+  uint16_t rim;
+  uint16_t teeth;
+  uint16_t mouth;
+};
+
+static const struct crab_colors g_crab_palettes[FACE_NPALETTES] =
+{
+  /* 0: Day - Classic Ferris orange */
+  {
+    RGB(246, 246, 244),
+    RGB(150, 42, 4),
+    RGB(18, 14, 14),
+    RGB(242, 86, 22),
+    RGB(204, 60, 10),
+    RGB(250, 132, 72),
+    RGB(252, 250, 246),
+    RGB(200, 30, 26),
+    RGB(232, 222, 170),
+    RGB(60, 12, 12)
+  },
+  /* 1: Night - Deep ocean cyan */
+  {
+    RGB(18, 22, 32),
+    RGB(14, 68, 120),
+    RGB(10, 12, 18),
+    RGB(32, 140, 220),
+    RGB(20, 100, 170),
+    RGB(90, 190, 255),
+    RGB(230, 245, 255),
+    RGB(20, 90, 180),
+    RGB(180, 220, 240),
+    RGB(12, 24, 48)
+  },
+  /* 2: Retro - Terminal phosphor green */
+  {
+    RGB(12, 20, 12),
+    RGB(20, 100, 30),
+    RGB(8, 14, 8),
+    RGB(40, 200, 70),
+    RGB(24, 140, 48),
+    RGB(110, 245, 140),
+    RGB(220, 255, 225),
+    RGB(30, 160, 60),
+    RGB(170, 240, 180),
+    RGB(10, 40, 16)
+  }
+};
+
+static const struct crab_colors *g_crab_colors = &g_crab_palettes[0];
+
+#define C_BG      (g_crab_colors->bg)
+#define C_LINE    (g_crab_colors->line)
+#define C_INK     (g_crab_colors->ink)
+#define C_SHELL   (g_crab_colors->shell)
+#define C_SHADE   (g_crab_colors->shade)
+#define C_LIGHT   (g_crab_colors->light)
+#define C_WHITE   (g_crab_colors->white)
+#define C_RIM     (g_crab_colors->rim)
+#define C_TEETH   (g_crab_colors->teeth)
+#define C_MOUTH   (g_crab_colors->mouth)
 
 /****************************************************************************
  * Private Functions
@@ -175,6 +234,9 @@ void face_render_crab(const struct face_surface *s,
   int scale = s->width / GRID;
   int brow = clampi(pose->brow - ANGER_BIAS, -FACE_UNIT, FACE_UNIT);
   int lift = clampi(-brow * 2 / FACE_UNIT, 0, 2);
+  int pal_idx = palette % FACE_NPALETTES;
+  int typing_l = 0;
+  int typing_r = 0;
   int open;
   int brow_y;
   int px;
@@ -182,9 +244,24 @@ void face_render_crab(const struct face_surface *s,
   int i;
   int dx;
 
-  (void)state;
-  (void)now_ms;
-  (void)palette;
+  if (pal_idx < 0)
+    {
+      pal_idx += FACE_NPALETTES;
+    }
+
+  g_crab_colors = &g_crab_palettes[pal_idx];
+
+  if (state == FACE_WORKING)
+    {
+      int step = (now_ms / 140) & 1;
+      typing_l = step ? 2 : 0;
+      typing_r = step ? 0 : 2;
+    }
+  else if (state == FACE_FAILED)
+    {
+      typing_l = 2;
+      typing_r = 2;
+    }
 
   if (scale < 1)
     {
@@ -211,8 +288,8 @@ void face_render_crab(const struct face_surface *s,
   leg(s, scale, 26, 33, 29, 36, 1);
   leg(s, scale, 29, 36, 30, 39, 1);
 
-  claw(s, scale, 0, lift);
-  claw(s, scale, 1, lift);
+  claw(s, scale, 0, lift + typing_l);
+  claw(s, scale, 1, lift + typing_r);
 
   /* The shell, which is also the face: a big round body. */
 

@@ -44,6 +44,7 @@ enum face_action
   FACE_ACT_NONE = 0,
   FACE_ACT_PRESET_NEXT,
   FACE_ACT_PRESET_PREV,
+  FACE_ACT_PRESET_RESET,  /* Joystick press, resets to default preset */
   FACE_ACT_BRIGHT_UP,
   FACE_ACT_BRIGHT_DOWN,
   FACE_ACT_HOLD,          /* A, toggles ignoring the state file */

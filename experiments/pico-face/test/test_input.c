@@ -54,6 +54,7 @@ static void test_each_button_maps(void)
 {
   expect(FACE_BTN_BIT(FACE_BTN_LEFT), 0, FACE_ACT_PRESET_PREV, "left");
   expect(FACE_BTN_BIT(FACE_BTN_RIGHT), 0, FACE_ACT_PRESET_NEXT, "right");
+  expect(FACE_BTN_BIT(FACE_BTN_PRESS), 0, FACE_ACT_PRESET_RESET, "press");
   expect(FACE_BTN_BIT(FACE_BTN_UP), 0, FACE_ACT_BRIGHT_UP, "up");
   expect(FACE_BTN_BIT(FACE_BTN_DOWN), 0, FACE_ACT_BRIGHT_DOWN, "down");
   expect(FACE_BTN_BIT(FACE_BTN_A), 0, FACE_ACT_HOLD, "A");
@@ -117,14 +118,14 @@ static void test_precedence_is_stable(void)
   expect(both, 0, FACE_ACT_PRESET_PREV, "left beats Y");
 }
 
-/* The joystick press has no binding yet, so it must stay silent rather than
- * falling through to whatever is first in the table.
+/* Unused button bits must stay silent rather than falling through to
+ * whatever is first in the table.
  */
 
 static void test_unbound_button_is_silent(void)
 {
-  expect(FACE_BTN_BIT(FACE_BTN_PRESS), 0, FACE_ACT_NONE,
-         "the joystick press is unbound");
+  expect(FACE_BTN_BIT(9), 0, FACE_ACT_NONE,
+         "an unused button bit is silent");
 }
 
 /* Bits above the ones the panel uses must be ignored, since a wider mask
