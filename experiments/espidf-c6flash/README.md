@@ -8,6 +8,13 @@ ESP32-P4 with no external hardware.
 - Result: inconclusive. `esp_loader_connect()` times out, but the bootstrap pin the test used is an audio pin
   on this board, so download mode was never entered.
 
+
+### The Board Is Not Espressif's Reference
+
+This board is a Waveshare ESP32-P4-WIFI6, not the ESP32-P4-Function-EV-Board that earlier notes named. It has no
+`PROG_C6` header. Waveshare exposes the C6 as "ESP32-C6 UART Pads", so any mention of that header below describes
+Espressif's board and not this one. Reaching the C6 here needs a soldered connection.
+
 ### Why This Exists
 
 Wi-Fi and Bluetooth on this board need the C6, and the C6 does not enumerate as an SDIO card under ESP-Hosted.

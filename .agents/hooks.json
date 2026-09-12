@@ -1,0 +1,44 @@
+{
+  "board-face": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ../tools/face-hook.py --event PreInvocation"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ../tools/face-hook.py --event PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ../tools/face-hook.py --event PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "python3 ../tools/face-hook.py --event PostInvocation"
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ../tools/face-hook.py --event Stop"
+      }
+    ]
+  }
+}

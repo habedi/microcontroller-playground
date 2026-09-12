@@ -1,0 +1,45 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config PICO_FACE
+	tristate "Face on the LCD"
+	default n
+	depends on VIDEO_FB
+	---help---
+		Draws an expressive face on the framebuffer and takes its expression
+		from a small file, so anything on the board or on the network can
+		change it with one echo.
+
+if PICO_FACE
+
+config PICO_FACE_PROGNAME
+	string "Program name"
+	default "face"
+
+config PICO_FACE_PRIORITY
+	int "Task priority"
+	default 100
+
+config PICO_FACE_STACKSIZE
+	int "Stack size"
+	default 4096
+
+config PICO_FACE_BUTTONS_DEV
+	string "Buttons device"
+	default "/dev/buttons"
+	---help---
+		The joystick and the four buttons on the panel, as registered by
+		btn_lower_initialize().  The face runs without them when the device
+		is missing, so a build with no button support still works.
+
+config PICO_FACE_STATE_FILE
+	string "State file"
+	default "/tmp/face"
+	---help---
+		The render loop reads the current expression out of this file.  It
+		has to be on a writable filesystem, which on this board means tmpfs
+		at /tmp or littlefs at /data.
+
+endif

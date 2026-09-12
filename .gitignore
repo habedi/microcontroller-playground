@@ -19,6 +19,16 @@ build/
 # environment does.
 managed_components/
 
+# NuttX builds an out-of-tree application where its sources live, because it is
+# reached through the apps/external symlink. So object files and dependency
+# lists land under experiments/ rather than under external/ like every other
+# build product. The object file names embed an absolute path, which is a second
+# reason they must never be committed.
+experiments/**/*.o
+experiments/**/Make.dep
+experiments/**/.depend
+experiments/**/.built
+
 # Personal working notes
 *.local.md
 dist/

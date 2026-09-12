@@ -1,0 +1,43 @@
+diff --git a/arch/arm/src/rp23xx/rp23xx_dmac.c b/arch/arm/src/rp23xx/rp23xx_dmac.c
+index 72f839f2..51a056d5 100644
+--- a/arch/arm/src/rp23xx/rp23xx_dmac.c
++++ b/arch/arm/src/rp23xx/rp23xx_dmac.c
+@@ -585,6 +585,23 @@ void rp23xx_dmastop(DMA_HANDLE handle)
+   DEBUGASSERT(dmach);
+   bit = 1 << dmach->chan;
+ 
++  /* Aborting a channel raises a completion interrupt that no transfer
++   * produced.  If the channel is still unmasked, the shared handler runs its
++   * callback for a transfer that never happened and then clears the
++   * callback, so the next real completion is dropped.  A driver that waits
++   * for one post per channel then waits forever.  Mask the channel first and
++   * acknowledge the spurious request afterwards, which is the sequence the
++   * Pico SDK documents for an abort.
++   */
++
++  clrbits_reg32(bit, RP23XX_DMA_INTE0);
++
++  /* Errata RP2350-E5 asks for the enable bit to be cleared before the abort,
++   * otherwise the channel can re-trigger itself.
++   */
++
++  clrbits_reg32(RP23XX_DMA_CTRL_TRIG_EN, RP23XX_DMA_CTRL_TRIG(dmach->chan));
++
+   /* Disable the channel */
+ 
+   setbits_reg32(bit, RP23XX_DMA_CHAN_ABORT);
+@@ -594,6 +611,14 @@ void rp23xx_dmastop(DMA_HANDLE handle)
+       stat = getreg32(RP23XX_DMA_CHAN_ABORT);
+     }
+   while (stat & bit);
++
++  /* INTS0 clears on a write of one, so this acknowledges this channel and
++   * leaves every other channel alone.
++   */
++
++  putreg32(bit, RP23XX_DMA_INTS0);
++
++  setbits_reg32(bit, RP23XX_DMA_INTE0);
+ }
+ 
+ /****************************************************************************
