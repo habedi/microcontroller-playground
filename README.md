@@ -29,7 +29,7 @@ make shell
 ```
 
 > [!IMPORTANT]
-> The first `make shell` builds the RISC-V cross compiler toolchain from source, which can take some time.
+> The first `make shell` builds the RISC-V cross-compiler toolchain from source, which can take some time.
 > When the first build is done, run `make shell-pin`, so a Nix garbage collection does not discard the build results.
 > The Espressif boards also need `make install`, which installs esptool. Note that the Raspberry Pi Pico 2 does not need it.
 
@@ -38,7 +38,7 @@ make shell
 ```shell
 make nuttx-configure BOARD=raspberrypi-pico-2:usbnsh
 make nuttx-build
-make flash-pico-uf2             # Hold BOOTSEL (button on the board) while plugging the board in
+make flash-pico-uf2             # Hold the BOOTSEL button pressed down while plugging the board in
 make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
 ```
 
