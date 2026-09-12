@@ -35,22 +35,50 @@ SPOOL = os.path.join(_RUNTIME, "claude-face.state")
 LOCK = os.path.join(_RUNTIME, "claude-face.lock")
 
 # Tools that change files on disk, which the face reports as looking down.
-EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+EDIT_TOOLS = {
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "MultiEdit",
+    "write_to_file",
+    "replace_file_content",
+}
 
 
-def word_for(event: dict) -> str | None:
+def _extract_tool_name(event: dict) -> str:
+    """Extracts the tool name from either Claude Code or Antigravity payloads."""
+    name = event.get("tool_name")
+    if not name:
+        tool_call = event.get("toolCall")
+        if isinstance(tool_call, dict):
+            name = tool_call.get("name")
+    if not name:
+        return ""
+    # Strip any plugin/namespace prefix such as "default_api:run_command".
+    return name.split(":")[-1]
+
+
+def word_for(event: dict, event_name: str | None = None) -> str | None:
     """Maps a hook event to one of the six expressions, or None to do nothing."""
-    name = event.get("hook_event_name", "")
+    name = event_name or event.get("hook_event_name", "")
 
-    if name == "SessionStart":
+    if name in ("SessionStart", "SessionEnd"):
         return "idle"
 
     if name == "PreToolUse":
-        return "editing" if event.get("tool_name") in EDIT_TOOLS else "working"
+        tool = _extract_tool_name(event)
+        if tool in EDIT_TOOLS:
+            return "editing"
+        if tool == "ask_question":
+            return "waiting"
+        return "working"
 
     if name == "PostToolUse":
-        # There is no dedicated failure field, so this reads the response the
-        # way a person would. It is a heuristic and it will miss cases.
+        # Antigravity reports tool errors in event["error"].
+        if event.get("error"):
+            return "failed"
+
+        # Claude Code reports tool errors in event["tool_response"].
         response = event.get("tool_response")
         if isinstance(response, dict):
             if response.get("is_error") or response.get("error"):
@@ -60,14 +88,14 @@ def word_for(event: dict) -> str | None:
 
         return None
 
+    if name == "PreInvocation":
+        return "working"
+
     if name == "Notification":
         return "waiting"
 
-    if name in ("Stop", "SubagentStop"):
+    if name in ("Stop", "SubagentStop", "PostInvocation"):
         return "done"
-
-    if name == "SessionEnd":
-        return "idle"
 
     return None
 
@@ -81,10 +109,19 @@ def spool(word: str) -> None:
     os.replace(tmp, SPOOL)
 
 
+def _python_bin() -> str:
+    """Finds the Python interpreter that has project dependencies installed."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    venv_py = os.path.join(os.path.dirname(here), ".venv", "bin", "python")
+    if os.path.exists(venv_py):
+        return venv_py
+    return sys.executable
+
+
 def detach() -> None:
     """Starts the pushing half without waiting for it."""
     subprocess.Popen(
-        [sys.executable, os.path.abspath(__file__), "--push"],
+        [_python_bin(), os.path.abspath(__file__), "--push"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -142,12 +179,42 @@ def main() -> int:
             push()
             return 0
 
-        event = json.load(sys.stdin)
-        word = word_for(event)
+        event_name = None
+        if "--event" in sys.argv:
+            idx = sys.argv.index("--event")
+            if idx + 1 < len(sys.argv):
+                event_name = sys.argv[idx + 1]
+
+        event = {}
+        try:
+            event = json.load(sys.stdin)
+        except Exception:
+            pass
+
+        word = word_for(event, event_name=event_name)
+
+        with open(os.path.join(_RUNTIME, "face-hook.log"), "a", encoding="utf-8") as log:
+            log.write(f"event={event_name} tool={_extract_tool_name(event)} word={word}\n")
 
         if word is not None:
             spool(word)
             detach()
+
+        # If invoked under Antigravity, output the expected JSON response on stdout.
+        name = event_name or event.get("hook_event_name", "")
+        is_antigravity = (
+            event_name is not None
+            or "toolCall" in event
+            or "conversationId" in event
+            or "stepIdx" in event
+        )
+        if is_antigravity:
+            if name == "PreToolUse":
+                print(json.dumps({"decision": "allow"}))
+            elif name == "Stop":
+                print(json.dumps({"decision": "approve"}))
+            else:
+                print(json.dumps({}))
     except Exception:
         # A hook must never break the session it is reporting on.
         pass
