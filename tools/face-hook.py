@@ -67,6 +67,8 @@ def word_for(event: dict, event_name: str | None = None) -> str | None:
 
     if name == "PreToolUse":
         tool = _extract_tool_name(event)
+        if tool in ("call_mcp_tool", "face", "nsh", "port_status"):
+            return None
         if tool in EDIT_TOOLS:
             return "editing"
         if tool == "ask_question":
