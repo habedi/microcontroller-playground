@@ -30,13 +30,13 @@ make espidf-flash
 make espidf-monitor
 ```
 
-`ESPIDF_PORT` defaults to `/dev/ttyACM0`, which is correct for this board, because its USB-C connector goes
-to the chip's own USB Serial/JTAG controller. Leave the monitor with Ctrl-]. The program prints the chip
+`ESPIDF_PORT` defaults to `/dev/ttyACM0`, which connects to the board's onboard CH343
+bridge on UART0. Leave the monitor with Ctrl-]. The program prints the chip
 revision, the free heap, and a counter once per second. There is no shell and no Enter to press.
 
 ### Configuration
 
-`sdkconfig.defaults` holds the three settings this board needs. The resolved `sdkconfig` is generated into the
+`sdkconfig.defaults` holds the settings this board needs. The resolved `sdkconfig` is generated into the
 build directory instead of next to the project, so `make espidf-distclean` discards it; edits worth keeping
 belong in `sdkconfig.defaults`.
 
@@ -52,18 +52,18 @@ chip. These two move the accepted window to v1.0 through v1.99, which contains t
 the same two names, having taken them from ESP-IDF. The Kconfig help calls support for revisions below v3.0
 and from v3.0 up mutually exclusive, because of large hardware differences between them.
 
-The third selects the console:
+The third selects the default UART console:
 
 ```
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 ```
 
-ESP-IDF puts the console on UART0 by default, and on this board GPIO37 and GPIO38 reach an onboard WCH CH343
-bridge, so that default works over the board's UART connector with no extra hardware. Keeping the chip's own
-USB Serial/JTAG controller as the secondary console sends the same output to the other connector.
+ESP-IDF puts the console on UART0 by default, and on this board GPIO37 and GPIO38 reach the onboard WCH CH343
+bridge behind the USB-C port, so that default works with no extra hardware.
 
-PSRAM stays off, since it faults on this revision under ESP-IDF as well as under NuttX. See
-[../../docs/esp32p4.md](../../docs/esp32p4.md).
+PSRAM is left off because this program does not need it. It works at up to 200 MHz; see
+[../espidf-psram](../espidf-psram).
 
 ### Why This Exists Alongside NuttX
 
