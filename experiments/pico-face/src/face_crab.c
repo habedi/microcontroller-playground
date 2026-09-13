@@ -1,15 +1,7 @@
 /****************************************************************************
  * experiments/pico-face/src/face_crab.c
  *
- * The crab preset: an angry crustacean whose shell is its face, after the
- * well known drawing.  Drawn from shapes on a 40 by 40 grid blown up to the
- * panel, with a dark orange outline under every orange shape, on the white
- * ground of the original.
- *
- * The face takes its expression from the pose like the other drawn presets,
- * with two twists: the brows carry an anger bias, so the crab is grumpy at
- * rest and furious when a tool fails, and the mouth is never quite shut,
- * so its teeth show at rest and a frown opens it into a shout.
+ * Crab preset: shapes on a 40 by 40 grid.
  *
  ****************************************************************************/
 
@@ -53,7 +45,7 @@ struct crab_colors
 
 static const struct crab_colors g_crab_palettes[FACE_NPALETTES] =
 {
-  /* 0: Day - Classic Ferris orange */
+  /* 0: Day */
   {
     RGB(246, 246, 244),
     RGB(150, 42, 4),
@@ -66,7 +58,7 @@ static const struct crab_colors g_crab_palettes[FACE_NPALETTES] =
     RGB(232, 222, 170),
     RGB(60, 12, 12)
   },
-  /* 1: Night - Deep ocean cyan */
+  /* 1: Night */
   {
     RGB(18, 22, 32),
     RGB(14, 68, 120),
@@ -79,7 +71,7 @@ static const struct crab_colors g_crab_palettes[FACE_NPALETTES] =
     RGB(180, 220, 240),
     RGB(12, 24, 48)
   },
-  /* 2: Retro - Terminal phosphor green */
+  /* 2: Retro */
   {
     RGB(12, 20, 12),
     RGB(20, 100, 30),

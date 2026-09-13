@@ -1,13 +1,7 @@
 /****************************************************************************
  * experiments/pico-face/src/face_penguin.c
  *
- * The penguin preset: a round penguin in a horned helmet and a bow tie,
- * drawn from outlined shapes on a 40 by 40 grid blown up to the panel.
- *
- * Animated from the pose and the clock.  The eyes blink and follow the
- * gaze, the beak opens with the mouth, the helmet slides down over the eyes
- * when the brows lower and lifts when they rise, and the whole bird sways
- * from side to side on a slow waddle.
+ * Penguin preset: shapes on a 40 by 40 grid.
  *
  ****************************************************************************/
 
@@ -52,7 +46,7 @@ struct penguin_colors
 
 static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
 {
-  /* 0: Arctic Day - Sky blue */
+  /* 0: Arctic Day */
   {
     RGB(168, 214, 236),
     RGB(16, 16, 20),
@@ -69,7 +63,7 @@ static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
     RGB(226, 218, 182),
     RGB(176, 164, 124)
   },
-  /* 1: Polar Night - Starry navy */
+  /* 1: Polar Night */
   {
     RGB(16, 20, 36),
     RGB(8, 10, 18),
@@ -86,7 +80,7 @@ static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
     RGB(210, 215, 200),
     RGB(150, 160, 150)
   },
-  /* 2: Twilight / Sunset */
+  /* 2: Twilight */
   {
     RGB(60, 30, 48),
     RGB(20, 12, 18),

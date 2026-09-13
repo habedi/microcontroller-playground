@@ -1,11 +1,7 @@
 /****************************************************************************
  * experiments/pico-face/src/face_bot.c
  *
- * Minimalist robot / OLED eyes preset.  Two expressive glowing pill-shaped
- * eyes on an ink-black background, inspired by Vector and Cozmo.
- *
- * Highly efficient for partial redraw: because the background never changes,
- * only the pixels of the eyes are pushed over SPI.
+ * Minimalist robot eye preset: two pill-shaped eyes on a black ground.
  *
  ****************************************************************************/
 
@@ -207,7 +203,6 @@ static void draw_bot_eye(const struct face_surface *s, int cx, int cy,
 
       for (x = x0; x <= x1; x++)
         {
-          /* Inner/outer tilt offset across the eye width */
           int x_norm = ((x - cx) * tilt) / half_w;
           int smile_cut = 0;
 
@@ -218,19 +213,16 @@ static void draw_bot_eye(const struct face_surface *s, int cx, int cy,
                           / (half_w * half_w + 1);
             }
 
-          /* Cut top by brow tilt */
           if (dy < -half_h / 2 + x_norm)
             {
               continue;
             }
 
-          /* Cut bottom by smile arch */
           if (smile > 0 && dy > half_h - smile_cut)
             {
               continue;
             }
 
-          /* Bright inner core */
           if (hw > 4 && dy > -half_h + 4 && dy < half_h - 4 &&
               x > cx - hw + 4 && x < cx + hw - 4)
             {
@@ -277,8 +269,6 @@ void face_render_bot(const struct face_surface *s,
 
   col = &g_bot_palettes[pal_idx];
 
-  /* Gaze translation */
-
   gaze_x = (pose->pupil_x * pct(s->width, 4)) / FACE_UNIT;
   gaze_y = (pose->pupil_y * pct(s->height, 5)) / FACE_UNIT;
 
@@ -288,19 +278,13 @@ void face_render_bot(const struct face_surface *s,
   eye_h[0] = (eye_h_max * pose->eye_open_l) / FACE_UNIT;
   eye_h[1] = (eye_h_max * pose->eye_open_r) / FACE_UNIT;
 
-  /* Slanted brow: inner corner tilts down when brow is negative */
-
   tilt[0] = -(pose->brow * 8) / FACE_UNIT;
   tilt[1] = (pose->brow * 8) / FACE_UNIT;
-
-  /* Smiling arch on done */
 
   if (state == FACE_DONE && pose->mouth_curve > 0)
     {
       smile = (pose->mouth_curve * 12) / FACE_UNIT;
     }
-
-  /* Deep ink-black background clear */
 
   for (i = 0; i < s->height; i++)
     {
@@ -313,7 +297,6 @@ void face_render_bot(const struct face_surface *s,
 
       if (eye_h[i] <= 3)
         {
-          /* Closed eye / blink: thin glowing horizontal slit */
           span(s, cy, cx[i] - eye_w / 2, cx[i] + eye_w / 2, col->eye);
         }
       else

@@ -11,7 +11,7 @@ OS: Apache NuttX, configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wif
 ### Status
 
 Working. The host tests pass, the image builds, and the face runs on the panel
-with all six expressions reachable in any of five presets, which the panel's
+with all six expressions reachable in any of six presets, which the panel's
 own joystick moves between.
 
 Measured on the board with `face -b`, which times the parts of a frame
@@ -23,28 +23,14 @@ separately on the vector preset:
 | Scanning it for changes | 2.9 ms |
 | Pushing all of it over SPI | 13.5 ms |
 
-So a full redraw allows 59 frames per second and the bus is its limit, at
-14.4 ms of unavoidable SPI time for 115 KB at 64 MHz. With partial redraw the
-bus leaves the equation and the ceiling is about 158 frames per second.
+A full redraw allows 59 frames per second with the SPI bus as the bottleneck.
+Partial redraw pushes only changed regions, raising the ceiling to about 158
+frames per second.
 
-The render loop takes about 20 percent of one core, measured with `ps` in
-every state, and the same in states that send almost nothing as in states
-that send half the panel. The push is a DMA transfer the task sleeps
-through, so it never was CPU time, and the 15.7 percent an earlier version
-of these notes attributed to the bus was the drawing. Partial redraw added
-the scan to that. What it bought is the bus: it is nearly idle, a frame
-reaches the panel a few milliseconds after it is drawn rather than 14, and
-the frame rate could triple. The loop sleeps 33 ms after each frame, so it
-runs at about 25 frames per second rather than 30.
-
-One reading of 33 percent was seen once, on a loop started right after the
-benchmark, and could not be reproduced. Every later loop started the same way
-read 20 percent.
-
-Other numbers: 4 KB of stack, unchanged from the default, and 4 KB of static
-RAM for the change tracker. The vector face costs 7 KB of flash, and the two
-pixel presets, the overlay font, the controls, and the tracker about 11 KB
-more.
+The render loop takes about 20 percent of one core, measured with `ps` across
+all states. The push is a DMA transfer the task sleeps through. The loop
+sleeps 33 ms after each frame, running at about 25 frames per second. Memory
+usage is 4 KB of stack and 4 KB of static RAM for the change tracker.
 
 ### How It Is Put Together
 
@@ -94,22 +80,8 @@ No board and no cross compiler needed:
 make -C experiments/pico-face/test test
 ```
 
-The address and undefined behaviour sanitizers are on by default, since an out
-of bounds write in the drawing code is the failure worth catching. Three tests
-earned their place by catching real bugs, and two more were added when the
-pixel portrait turned out to have the same two signs backwards:
-
-- The widest row of an eye has to be its middle. The first version of the
-  corner arithmetic measured the inset from the wrong side and drew an
-  hourglass, and every other test still passed.
-- A smile has to dip in the middle, because y grows downwards. Getting the sign
-  wrong drew a frown for `done` and a smile for `failed`.
-- Moving the pupil must not light any pixel outside the eye. It used to spill
-  over a narrowed lid and read as a dark blob hanging off the face.
-- A lowered brow has to drop its inner end and a raised one has to lift it.
-  The pixel portrait had this and the smile inverted, so `waiting` looked
-  angry, `failed` smiled, and `done` frowned, and the contact sheet below is
-  where it showed.
+The address and undefined behaviour sanitizers are on by default to catch
+out of bounds writes in drawing code.
 
 ### Partial Redraw
 
@@ -169,10 +141,6 @@ make flash-pico-uf2
 
 The flash needs the BOOTSEL button held while the board is plugged in.
 
-One consequence of building in place: the object files and dependency lists
-land under `experiments/` instead of under `external/`, and their names embed
-an absolute path. `.gitignore` covers them.
-
 ### Running It
 
 ```
@@ -200,9 +168,9 @@ stopping on it. Hold ignores the expression in the file, not the quit word.
 ### Presets
 
 A preset is a name and a render function in `src/face_preset.c`, so adding a
-look is one new file and one new row. All three share the expression state
-machine in `face.c`, which means the hook drives whichever one is showing
-without knowing anything about it.
+look is one new file and one new row. All six share the expression state
+machine in `face.c`, which means the driver updates whichever preset is active
+without knowing preset details.
 
 | Preset | What it draws |
 | --- | --- |
@@ -230,13 +198,6 @@ the beak opens with the mouth, and the whole bird sways on a slow waddle driven 
 the clock. The bot preset draws two pill-shaped glowing eyes on an ink-black ground,
 tilting on brows and curving into a smile on done, while sending almost nothing over
 the SPI bus.
-
-An earlier third preset was a 32 by 32 character sprite with one hand drawn
-pose per expression. It was dropped because the art did not read at this
-size and hand editing 32 rows of characters per pose made it expensive to
-change. If sprites come back, `test_sprite.c` is where a row length check
-belongs, since a short row shifts every pixel after it without failing
-anything else.
 
 ### Panel Controls
 
@@ -294,16 +255,12 @@ The wiring lives in `.claude/settings.local.json`, which this repository's
 `.gitignore` covers, so it stays on one machine. The script in `tools/` is
 committed; only the six hook entries pointing at it are local.
 
-Two limits worth knowing:
+Two limits:
 
-- Failure detection is a guess. There is no dedicated field saying a tool
-  failed, so the script reads the response the way a person would and will miss
-  cases.
-- The spool and lock paths deliberately avoid `tempfile.gettempdir()`, which
-  follows `TMPDIR`. The two halves have to agree on the path, and `TMPDIR` is
-  not the same in every context a hook runs from. The first version used it and
-  the two halves wrote and read different files, so the timings looked right
-  while nothing reached the board.
+- Failure detection parses response text for error keywords because hooks
+  provide no structured error flag.
+- Spool and lock paths use `XDG_RUNTIME_DIR` or `/tmp` so the hook and pusher
+  agree on file locations regardless of context.
 
 ### Not Done Yet
 

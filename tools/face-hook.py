@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code hook that puts the session's state on the board's LCD.
+"""Agent lifecycle hook that puts the session's state on the board's LCD.
 
 A hook runs in front of the thing it reports on, so it has to be quick. A
 serial round trip to the board takes a second or two, which would be added to
