@@ -44,6 +44,7 @@ PROMPT = "nsh>"
 SYNC_TIMEOUT_S = 3.0
 
 FACE_STATES = ("idle", "working", "editing", "waiting", "failed", "done", "quit")
+FACE_PRESETS = ("vector", "pixel", "crab", "penguin", "bot", "graph")
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 _MAC = re.compile(r"(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b")
@@ -188,15 +189,23 @@ def nsh(command: str, timeout_s: float = 8.0) -> str:
     return _converse(command, timeout_s)
 
 
-def face(state: str) -> str:
-    """Set the expression on the LCD.
+def face(state: str, preset: str = "") -> str:
+    """Set the expression on the LCD, and optionally the preset look.
 
     Args:
-        state: One of idle, working, editing, waiting, failed, done, or quit.
+        state: One of idle, working, editing, waiting, failed, done, quit, or a preset name.
+        preset: Optional preset name (vector, pixel, crab, penguin, bot, or graph).
     """
     state = state.strip().lower()
+
+    if state in FACE_PRESETS and not preset:
+        return _converse(f"face {state}", 8.0)
+
     if state not in FACE_STATES:
-        return f"unknown state {state!r}. Use one of: {', '.join(FACE_STATES)}"
+        return (
+            f"unknown state {state!r}. Use one of: {', '.join(FACE_STATES)}, "
+            f"or a preset: {', '.join(FACE_PRESETS)}"
+        )
 
     if state != "quit":
         # Start the render loop if it is not already running, so the first call
@@ -209,6 +218,9 @@ def face(state: str) -> str:
                     "the face application is not in this image. Build the "
                     "configuration that sets CONFIG_PICO_FACE."
                 )
+
+    if preset and preset.strip().lower() in FACE_PRESETS:
+        _converse(f"face {preset.strip().lower()}", 8.0)
 
     out = _converse(f"face {state}", 8.0)
 

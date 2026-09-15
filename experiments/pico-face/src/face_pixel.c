@@ -171,6 +171,54 @@ void face_render_pixel(const struct face_surface *s,
   px_eye(s, scale, pal, eye_cx[0], 25, pose->eye_open_l, px, py);
   px_eye(s, scale, pal, eye_cx[1], 25, pose->eye_open_r, px, py);
 
+  /* Developer headphones */
+
+  face_grid_rect(s, GRID, scale, 8, 23, 3, 7, pal->colour[C_CLOTH_DK]);
+  face_grid_rect(s, GRID, scale, 37, 23, 3, 7, pal->colour[C_CLOTH_DK]);
+  face_grid_rect(s, GRID, scale, 9, 24, 2, 5, pal->colour[C_CLOTH]);
+  face_grid_rect(s, GRID, scale, 37, 24, 2, 5, pal->colour[C_CLOTH]);
+
+  /* Headphone band across hair */
+
+  face_grid_rect(s, GRID, scale, 12, 6, 24, 2, pal->colour[C_CLOTH_DK]);
+  face_grid_rect(s, GRID, scale, 10, 8, 3, 15, pal->colour[C_CLOTH_DK]);
+  face_grid_rect(s, GRID, scale, 35, 8, 3, 15, pal->colour[C_CLOTH_DK]);
+
+  /* Editing pencil behind ear and steaming coffee mug */
+
+  if (state == FACE_EDITING)
+    {
+      face_grid_rect(s, GRID, scale, 37, 18, 2, 4, pal->colour[C_HAIR]);
+      face_grid_rect(s, GRID, scale, 38, 17, 1, 1, pal->colour[C_OUTLINE]);
+
+      /* Coffee mug on desk with coffee liquid */
+
+      face_grid_rect(s, GRID, scale, 39, 41, 6, 6, pal->colour[C_WHITE]);
+      face_grid_rect(s, GRID, scale, 40, 41, 4, 1, pal->colour[C_HAIR_DK]);
+      face_grid_rect(s, GRID, scale, 45, 42, 2, 3, pal->colour[C_WHITE]);
+      face_grid_rect(s, GRID, scale, 41, 38, 1, 2, pal->colour[C_WHITE]);
+      face_grid_rect(s, GRID, scale, 43, 37, 1, 2, pal->colour[C_WHITE]);
+    }
+
+  /* Failure sweat drop on temple */
+
+  if (state == FACE_FAILED)
+    {
+      face_grid_rect(s, GRID, scale, 34, 15, 2, 3, pal->colour[C_WHITE]);
+      face_grid_rect(s, GRID, scale, 34, 16, 1, 1, pal->colour[C_CLOTH]);
+    }
+
+  /* Victory thumbs-up hand on done */
+
+  if (state == FACE_DONE)
+    {
+      face_grid_rect(s, GRID, scale, 35, 36, 5, 5, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, 36, 37, 3, 4, pal->colour[C_SKIN]);
+      face_grid_rect(s, GRID, scale, 36, 34, 3, 3, pal->colour[C_OUTLINE]);
+      face_grid_rect(s, GRID, scale, 37, 35, 1, 2, pal->colour[C_SKIN]);
+      face_grid_rect(s, GRID, scale, 37, 34, 1, 1, pal->colour[C_WHITE]);
+    }
+
   /* Brows.  Kept clear of each other so they never merge into one bar, and
    * tilted by the pose, which is most of the expression at this size.
    */

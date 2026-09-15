@@ -1,13 +1,7 @@
 /****************************************************************************
  * experiments/pico-face/src/face_penguin.c
  *
- * The penguin preset: a round penguin in a horned helmet and a bow tie,
- * drawn from outlined shapes on a 40 by 40 grid blown up to the panel.
- *
- * Animated from the pose and the clock.  The eyes blink and follow the
- * gaze, the beak opens with the mouth, the helmet slides down over the eyes
- * when the brows lower and lifts when they rise, and the whole bird sways
- * from side to side on a slow waddle.
+ * Penguin preset: shapes on a 40 by 40 grid.
  *
  ****************************************************************************/
 
@@ -52,7 +46,7 @@ struct penguin_colors
 
 static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
 {
-  /* 0: Arctic Day - Sky blue */
+  /* 0: Arctic Day */
   {
     RGB(168, 214, 236),
     RGB(16, 16, 20),
@@ -69,7 +63,7 @@ static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
     RGB(226, 218, 182),
     RGB(176, 164, 124)
   },
-  /* 1: Polar Night - Starry navy */
+  /* 1: Polar Night */
   {
     RGB(16, 20, 36),
     RGB(8, 10, 18),
@@ -86,7 +80,7 @@ static const struct penguin_colors g_penguin_palettes[FACE_NPALETTES] =
     RGB(210, 215, 200),
     RGB(150, 160, 150)
   },
-  /* 2: Twilight / Sunset */
+  /* 2: Twilight */
   {
     RGB(60, 30, 48),
     RGB(20, 12, 18),
@@ -320,6 +314,19 @@ void face_render_penguin(const struct face_surface *s,
   eye(s, scale, 14 + ox, 17, pose->eye_open_l, px, py);
   eye(s, scale, 25 + ox, 17, pose->eye_open_r, px, py);
 
+  /* Rosy cheeks */
+
+  rect(s, scale, 11 + ox, 23, 2, 1, C_BEAK);
+  rect(s, scale, 28 + ox, 23, 2, 1, C_BEAK);
+
+  /* Failure teardrop */
+
+  if (state == FACE_FAILED)
+    {
+      rect(s, scale, 13 + ox, 22, 1, 3, C_STEEL);
+      rect(s, scale, 13 + ox, 24, 2, 1, C_STEEL);
+    }
+
   open = (3 * clampi(pose->mouth_open, 0, FACE_UNIT)) / FACE_UNIT;
 
   rect(s, scale, 19 + ox, 21, 5, 3 + open, C_LINE);
@@ -363,6 +370,11 @@ void face_render_penguin(const struct face_surface *s,
   horn(s, scale, 8 + ox, 11 + helmet, 9, -1);
   horn(s, scale, 32 + ox, 11 + helmet, 9, 1);
 
+  /* Steel reinforcement bands at horn roots */
+
+  rect(s, scale, 7 + ox, 11 + helmet, 3, 1, C_STEEL_D);
+  rect(s, scale, 31 + ox, 11 + helmet, 3, 1, C_STEEL_D);
+
   /* Bow tie on a string that hangs lower in the middle of the neck. */
 
   for (i = -9; i <= 9; i++)
@@ -375,6 +387,34 @@ void face_render_penguin(const struct face_surface *s,
   rect(s, scale, 18 + ox, 29, 4, 2, C_LINE);
   rect(s, scale, 16 + ox, 29, 1, 1, C_GREY_DK);
   rect(s, scale, 23 + ox, 29, 1, 1, C_GREY_DK);
+
+  /* Cheering wings raised high on done */
+
+  if (state == FACE_DONE)
+    {
+      ellipse(s, scale, 6 + ox, 24, 4, 7, C_LINE);
+      ellipse(s, scale, 6 + ox, 24, 3, 6, C_WING);
+      ellipse(s, scale, 34 + ox, 24, 4, 7, C_LINE);
+      ellipse(s, scale, 34 + ox, 24, 3, 6, C_WING);
+
+      /* Victory sparkle */
+
+      rect(s, scale, 5 + ox, 14, 1, 3, C_WHITE);
+      rect(s, scale, 4 + ox, 15, 3, 1, C_WHITE);
+      rect(s, scale, 35 + ox, 14, 1, 3, C_WHITE);
+      rect(s, scale, 34 + ox, 15, 3, 1, C_WHITE);
+    }
+  else if (state == FACE_WORKING)
+    {
+      /* Working pickaxe in right wing */
+
+      int chip = (now_ms / 140) & 1;
+      int ax_y = 26 + (chip ? 2 : 0);
+
+      rect(s, scale, 33 + ox, ax_y, 1, 6, C_BROWN);
+      rect(s, scale, 31 + ox, ax_y, 5, 2, C_STEEL);
+      rect(s, scale, 35 + ox, ax_y - 1, 1, 1, C_WHITE);
+    }
 
   if (dirty != NULL)
     {

@@ -95,8 +95,8 @@ Flashing the C6 with matching slave firmware. Espressif documents two routes:
 - Serially through the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and explicitly not
   VDD, with the P4 held in its bootloader so it does not interfere. This needs a 3.3 V USB to UART adapter.
 
-The second is the only one available from this state, which restores the USB to UART cable in
-`docs/tools-to-buy.md` to a required item for this board rather than an optional one.
+The second is the only one available from this state, which makes a 3.3 V USB to UART
+adapter a requirement for flashing the coprocessor on this board.
 
 ### A Note on the Program
 

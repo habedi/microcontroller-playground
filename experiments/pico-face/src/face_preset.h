@@ -89,4 +89,10 @@ const struct face_preset *face_preset(int index);
 
 int face_preset_wrap(int index);
 
+/* Looks up a preset by name.  Returns its index in the table, or -1 if no
+ * preset has that name.
+ */
+
+int face_preset_find(const char *name);
+
 #endif /* __EXPERIMENTS_PICO_FACE_SRC_FACE_PRESET_H */

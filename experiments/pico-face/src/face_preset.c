@@ -6,6 +6,8 @@
  *
  ****************************************************************************/
 
+#include <string.h>
+
 #include "face_preset.h"
 
 /****************************************************************************
@@ -52,4 +54,24 @@ int face_preset_wrap(int index)
 const struct face_preset *face_preset(int index)
 {
   return &g_presets[face_preset_wrap(index)];
+}
+
+int face_preset_find(const char *name)
+{
+  int i;
+
+  if (name == NULL)
+    {
+      return -1;
+    }
+
+  for (i = 0; i < NPRESETS; i++)
+    {
+      if (strcmp(g_presets[i].name, name) == 0)
+        {
+          return i;
+        }
+    }
+
+  return -1;
 }

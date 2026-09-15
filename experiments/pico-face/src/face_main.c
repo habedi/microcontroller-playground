@@ -37,6 +37,10 @@
 #  define CONFIG_PICO_FACE_STATE_FILE "/tmp/face"
 #endif
 
+#ifndef CONFIG_PICO_FACE_PRESET_FILE
+#  define CONFIG_PICO_FACE_PRESET_FILE "/tmp/face_preset"
+#endif
+
 #ifndef CONFIG_PICO_FACE_BUTTONS_DEV
 #  define CONFIG_PICO_FACE_BUTTONS_DEV "/dev/buttons"
 #endif
@@ -155,11 +159,93 @@ static bool read_state(enum face_state *state, bool *quit)
   return face_state_from_name(buf, state) == 0;
 }
 
+static int write_preset(const char *name)
+{
+  int p = face_preset_find(name);
+  int fd;
+  int len;
+
+  if (p < 0)
+    {
+      fprintf(stderr, "face: unknown preset \"%s\"\n", name);
+      fprintf(stderr, "face: try vector, pixel, crab, penguin, bot, or graph\n");
+      return 1;
+    }
+
+  fd = open(CONFIG_PICO_FACE_PRESET_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0)
+    {
+      fprintf(stderr, "face: cannot write %s: %d\n",
+              CONFIG_PICO_FACE_PRESET_FILE, errno);
+      return 1;
+    }
+
+  len = (int)strlen(name);
+  if (write(fd, name, (size_t)len) != len)
+    {
+      close(fd);
+      return 1;
+    }
+
+  close(fd);
+  printf("face: preset set to %s\n", name);
+  return 0;
+}
+
+static bool read_preset(int *preset)
+{
+  char buf[32];
+  char *end;
+  int fd;
+  ssize_t n;
+  int p;
+
+  fd = open(CONFIG_PICO_FACE_PRESET_FILE, O_RDONLY);
+  if (fd < 0)
+    {
+      return false;
+    }
+
+  n = read(fd, buf, sizeof(buf) - 1);
+  close(fd);
+  unlink(CONFIG_PICO_FACE_PRESET_FILE);
+
+  if (n <= 0)
+    {
+      return false;
+    }
+
+  buf[n] = '\0';
+  end = buf + strlen(buf);
+  while (end > buf && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' '))
+    {
+      *--end = '\0';
+    }
+
+  p = face_preset_find(buf);
+  if (p >= 0)
+    {
+      *preset = p;
+      return true;
+    }
+
+  return false;
+}
+
 static int write_state(const char *word)
 {
   enum face_state state;
   int fd;
   int len;
+
+  /* If the word names a preset, set the preset rather than reporting an
+   * unknown state.
+   */
+
+  if (face_preset_find(word) >= 0)
+    {
+      return write_preset(word);
+    }
 
   /* Validate before writing, so a typo is reported here rather than being
    * silently ignored by the render loop.
@@ -167,9 +253,9 @@ static int write_state(const char *word)
 
   if (strcmp(word, "quit") != 0 && face_state_from_name(word, &state) != 0)
     {
-      fprintf(stderr, "face: unknown state \"%s\"\n", word);
+      fprintf(stderr, "face: unknown state or preset \"%s\"\n", word);
       fprintf(stderr, "face: try idle, working, editing, waiting, failed, "
-                      "done, or quit\n");
+                      "done, quit, or a preset name\n");
       return 1;
     }
 
@@ -466,6 +552,7 @@ static int run(void)
   if (read_state(&wanted, &quit) == false && quit)
     {
       unlink(CONFIG_PICO_FACE_STATE_FILE);
+      unlink(CONFIG_PICO_FACE_PRESET_FILE);
       quit = false;
     }
 
@@ -514,9 +601,16 @@ static int run(void)
            * this configuration.
            */
 
+          int wanted_preset;
+
           if (read_state(&wanted, &quit) && !ui.hold && wanted != f.state)
             {
               face_set_state(&f, wanted, anim_ms);
+            }
+
+          if (read_preset(&wanted_preset) && !ui.hold)
+            {
+              ui.preset = wanted_preset;
             }
         }
 
@@ -579,6 +673,17 @@ int main(int argc, FAR char *argv[])
       if (strcmp(argv[1], "-b") == 0)
         {
           return benchmark();
+        }
+
+      if (strcmp(argv[1], "preset") == 0)
+        {
+          if (argc > 2)
+            {
+              return write_preset(argv[2]);
+            }
+
+          printf("presets: vector, pixel, crab, penguin, bot, graph\n");
+          return 0;
         }
 
       return write_state(argv[1]);

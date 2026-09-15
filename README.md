@@ -66,14 +66,14 @@ make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
 ```
 
-The USB-C port on this board is wired to the chip's own USB Serial/JTAG controller, so it appears as `/dev/ttyACM0`.
-Boards that use a CP2102 bridge instead appear as `/dev/ttyUSB0`.
+The board's USB-C port connects to an onboard WCH CH343 USB to UART bridge on UART0
+(GPIO 37 and GPIO 38), appearing as `/dev/ttyACM0` with USB vendor `1a86`.
 
 > [!NOTE]
 > An ESP32-P4 with a silicon revision below v3.0 halts in the revision check that the stock configuration compiles in.
 > Configure such a chip from the saved configuration instead, with
-> `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1`.
-> It then boots NuttX, but the USB console does not reach a shell prompt.
+> `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
+> It sets `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100` and boots to an interactive NuttShell on UART0.
 
 > [!NOTE]
 > Serial access needs membership in the `dialout` group.
