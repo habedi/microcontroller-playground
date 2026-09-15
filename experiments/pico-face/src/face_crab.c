@@ -307,6 +307,11 @@ void face_render_crab(const struct face_surface *s,
   rect(s, scale, 24, 31, 1, 1, C_SHADE);
   rect(s, scale, 26, 30, 1, 1, C_SHADE);
 
+  /* Weathered barnacle markings on upper carapace */
+
+  rect(s, scale, 27, 13, 2, 1, C_LIGHT);
+  rect(s, scale, 28, 14, 1, 1, C_SHADE);
+
   /* Glasses: two thin frames, a bridge, and arms out to the shell's edge.
    * The eyes sit inside them.
    */
@@ -318,6 +323,44 @@ void face_render_crab(const struct face_surface *s,
   rect(s, scale, 19, 19, 2, 1, C_INK);
   rect(s, scale, 7, 19, 3, 1, C_INK);
   rect(s, scale, 30, 19, 3, 1, C_INK);
+
+  /* Glint on glasses corner */
+
+  rect(s, scale, 11, 18, 1, 1, C_WHITE);
+  rect(s, scale, 22, 18, 1, 1, C_WHITE);
+
+  /* Steam puffs from shell vents on failure */
+
+  if (state == FACE_FAILED)
+    {
+      int puff = (int)((now_ms / 150) % 3);
+
+      rect(s, scale, 3 - puff, 15 - puff, 2, 2, C_WHITE);
+      rect(s, scale, 36 + puff, 15 - puff, 2, 2, C_WHITE);
+      rect(s, scale, 4, 16, 1, 1, C_LIGHT);
+      rect(s, scale, 35, 16, 1, 1, C_LIGHT);
+    }
+
+  /* Editing stylus in right claw */
+
+  if (state == FACE_EDITING)
+    {
+      rect(s, scale, 33, 3, 1, 4, C_TEETH);
+      rect(s, scale, 33, 1, 1, 2, C_WHITE);
+    }
+
+  /* Victory sparkles and rosy cheeks on done */
+
+  if (state == FACE_DONE)
+    {
+      rect(s, scale, 7, 1, 1, 3, C_WHITE);
+      rect(s, scale, 6, 2, 3, 1, C_WHITE);
+      rect(s, scale, 32, 1, 1, 3, C_WHITE);
+      rect(s, scale, 31, 2, 3, 1, C_WHITE);
+
+      rect(s, scale, 8, 23, 2, 1, C_LIGHT);
+      rect(s, scale, 30, 23, 2, 1, C_LIGHT);
+    }
 
   px = clampi(pose->pupil_x / (FACE_UNIT / 2 + 1), -1, 1);
   py = clampi(pose->pupil_y / (FACE_UNIT / 2 + 1), 0, 1);

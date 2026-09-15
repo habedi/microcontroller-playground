@@ -144,21 +144,22 @@ The flash needs the BOOTSEL button held while the board is plugged in.
 ### Running It
 
 ```
-nsh> face &          # render loop in the background
-nsh> face working    # change the expression
+nsh> face &              # render loop in the background
+nsh> face working        # change the expression
+nsh> face bot            # switch preset by name
+nsh> face preset crab    # switch preset via preset subcommand
 nsh> face done
-nsh> face quit       # stop the loop
-nsh> face -b         # frames per second on this panel
+nsh> face quit           # stop the loop
+nsh> face -b             # frames per second on this panel
 ```
 
-`face` with an argument writes the word into `/tmp/face`, which is what the
-render loop polls, so anything that can write that file can drive the face.
-`/tmp` is mounted at boot by the `rcS` script described in
-`docs/raspberrypi-pico-2.md`.
+`face` with an expression name writes the word into `/tmp/face`, which the
+render loop polls. If the word names a preset instead, it writes to
+`/tmp/face_preset` to switch the look immediately.
 
-The six words are `idle`, `working`, `editing`, `waiting`, `failed`, and
-`done`. An unknown word is rejected where it is typed rather than ignored by
-the render loop.
+The six state words are `idle`, `working`, `editing`, `waiting`, `failed`, and
+`done`. The six preset names are `vector`, `pixel`, `crab`, `penguin`, `bot`,
+and `graph`.
 
 `quit` is the only way to stop the loop, since `kill` does nothing in this
 configuration. The word stays in the file so that every running loop sees it,
@@ -175,11 +176,11 @@ without knowing preset details.
 | Preset | What it draws |
 | --- | --- |
 | `vector` | The original amber face, drawn from shapes with an open mouth aperture on waiting and done. |
-| `pixel` | A pixel portrait bust on a 48 by 48 grid, five panel pixels per art pixel. |
-| `crab` | An angry crab whose shell is its face, with typing claw animations and themed palettes, on a 40 by 40 grid. |
-| `penguin` | A round penguin in a horned helmet and a bow tie, with drooping failure animation and palettes, on the same grid. |
-| `bot` | Minimalist glowing robot eyes on an ink-black OLED-style ground, highly bus efficient. |
-| `graph` | The state machine as a diagram: six nodes on a ring, the current one red, the others orange. |
+| `pixel` | A developer bust with over-ear headphones, an editing pencil and coffee mug, a failure sweat drop, and a victory thumbs-up. |
+| `crab` | An angry crab with glasses, typing claws, shell barnacles, a failure steam vent, an editing stylus, and victory sparkles. |
+| `penguin` | A round viking penguin with rosy cheeks, an iron-banded helmet, a working pickaxe, a failure teardrop, and cheering wings. |
+| `bot` | A cybernetic monitor chassis with an antenna status beacon, scanning laser beams, an activity meter, and digital error cross eyes. |
+| `graph` | A state machine diagram with a central telemetry hub, and animated data packets flowing along active transition edges. |
 
 The five faces take their shape from `struct face_pose`, so blinks and
 pupil drift work in all of them. The graph is not a face. It draws the six
@@ -190,14 +191,16 @@ orange. It is the one preset that says which state is showing in words, so
 it doubles as a check on the hook. The crab adds two biases of its own: its brows sit
 lower than the pose asks, so it is grumpy at rest and furious on `failed`,
 and its mouth is never quite shut, so its teeth show at rest and a frown
-opens it into a shout and lifts its claws. It alternates its claws in a rapid
-typing rhythm when working, and supports classic, ocean, and retro terminal palettes.
-The penguin has no brows, so the helmet stands in: it slides down over the eyes
-when the brows lower, droops further over the eyes when failed, lifts when they rise,
-the beak opens with the mouth, and the whole bird sways on a slow waddle driven by
-the clock. The bot preset draws two pill-shaped glowing eyes on an ink-black ground,
-tilting on brows and curving into a smile on done, while sending almost nothing over
-the SPI bus.
+opens it into a shout while steam puffs from its shell vents. It alternates its claws
+in a rapid typing rhythm when working, holds an editing stylus when files change, and
+celebrates with victory sparkles when done. The penguin has no brows, so the helmet
+stands in: it slides down over the eyes when the brows lower, lifts when they rise,
+and sports iron bands at the horn roots. Tux has blushing cheeks, wields a chipping
+pickaxe when working, sheds a teardrop when failed, and flings both wings into the air
+to celebrate completion. The bot preset draws pill-shaped glowing eyes inside a dark
+bezel chassis with a top antenna beacon, laser scanning beams on working, an LED
+activity meter on editing, an inquisitive tilt on waiting, bold digital red `X` eyes
+on failure, and happy arches on completion.
 
 ### Panel Controls
 

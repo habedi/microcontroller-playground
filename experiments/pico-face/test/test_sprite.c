@@ -92,7 +92,11 @@ static void test_preset_wrap(void)
 
       check(p->name != NULL && p->name[0] != '\0', "preset is named");
       check(p->render != NULL, "preset has a renderer");
+      check(face_preset_find(p->name) == i, "preset name resolves to its index");
     }
+
+  check(face_preset_find("nonexistent") == -1, "unknown preset returns -1");
+  check(face_preset_find(NULL) == -1, "null preset returns -1");
 }
 
 /* Every preset has to fill the surface it is handed and stay inside it.  The
