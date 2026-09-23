@@ -49,9 +49,8 @@ most of it is testable on the host:
   expressions is interpolation. It knows nothing about NuttX.
 - `src/face_preset.c` holds the table of looks. A preset is a name and a
   render function, and `face_render.c` is simply the first row in it.
-  `face_pixel.c`, `face_crab.c`, and `face_penguin.c` are the faces, drawn
-  from shapes on a coarse grid with the grid drawing and the palettes in
-  `face_sprite.c`. `face_graph.c` draws the state machine itself.
+  `face_pixel.c`, `face_crab.c`, `face_penguin.c`, and `face_bot.c` draw
+  the other faces, while `face_graph.c` draws the state machine itself.
 - `src/face_input.c` turns a button mask into an action. It is a pure function
   of the current and previous masks, with no board code, so the edge detection
   is tested on the host.
@@ -106,8 +105,8 @@ crab           0%       0%       0%       0%       0%       0%
 The vector face in `working` and `waiting` is the exception. Its glow pulses
 the background colour, and a background step is a whole frame. That is the
 designed effect for `waiting`, meant to catch the eye from across the room,
-so it is left alone. The other two presets have a fixed background and only
-ever send the eyes and the mouth.
+so it is left alone. The other presets have a fixed background and only
+send the eyes and mouth.
 
 The overlay shows the measured share on the board as `BUS`, next to `FPS`.
 The scan reads two pixels per word, so the box's sides land on even pixels,
@@ -175,12 +174,12 @@ without knowing preset details.
 
 | Preset | What it draws |
 | --- | --- |
-| `vector` | The original amber face, drawn from shapes with an open mouth aperture on waiting and done. |
-| `pixel` | A developer bust with over-ear headphones, an editing pencil and coffee mug, a failure sweat drop, and a victory thumbs-up. |
-| `crab` | An angry crab with glasses, typing claws, shell barnacles, a failure steam vent, an editing stylus, and victory sparkles. |
-| `penguin` | A round viking penguin with rosy cheeks, an iron-banded helmet, a working pickaxe, a failure teardrop, and cheering wings. |
-| `bot` | A cybernetic monitor chassis with an antenna status beacon, scanning laser beams, an activity meter, and digital error cross eyes. |
-| `graph` | A state machine diagram with a central telemetry hub, and animated data packets flowing along active transition edges. |
+| `vector` | The original amber face, drawn from geometric shapes. |
+| `pixel` | A pixel portrait bust on a 48 by 48 grid. |
+| `crab` | An angry crab on a 40 by 40 grid with animated claws. |
+| `penguin` | A penguin in a horned helmet and bow tie on a 40 by 40 grid. |
+| `bot` | Glowing robot eyes inside a bezel chassis with an antenna beacon. |
+| `graph` | The state machine diagram with nodes on a ring. |
 
 The five faces take their shape from `struct face_pose`, so blinks and
 pupil drift work in all of them. The graph is not a face. It draws the six
@@ -188,19 +187,12 @@ states as nodes on a ring, joins every pair with a faint edge because the
 hook can move between any two, and shows the current state as a red node
 with its edges lit, pulsing on the pose's glow, while the other five are
 orange. It is the one preset that says which state is showing in words, so
-it doubles as a check on the hook. The crab adds two biases of its own: its brows sit
-lower than the pose asks, so it is grumpy at rest and furious on `failed`,
-and its mouth is never quite shut, so its teeth show at rest and a frown
-opens it into a shout while steam puffs from its shell vents. It alternates its claws
-in a rapid typing rhythm when working, holds an editing stylus when files change, and
-celebrates with victory sparkles when done. The penguin has no brows, so the helmet
-stands in: it slides down over the eyes when the brows lower, lifts when they rise,
-and sports iron bands at the horn roots. Tux has blushing cheeks, wields a chipping
-pickaxe when working, sheds a teardrop when failed, and flings both wings into the air
-to celebrate completion. The bot preset draws pill-shaped glowing eyes inside a dark
-bezel chassis with a top antenna beacon, laser scanning beams on working, an LED
-activity meter on editing, an inquisitive tilt on waiting, bold digital red `X` eyes
-on failure, and happy arches on completion.
+it doubles as a check on the hook. The crab lowers its brows and keeps its
+mouth slightly open at rest, and animates its claws during `working`.
+The penguin helmet moves with the brow pose, sliding down over the eyes
+when the brows lower and lifting when they rise. The bot preset draws
+pill-shaped eyes inside a bezel chassis, tilting on brows, curving into an
+arch on `done`, and displaying cross eyes on `failed`.
 
 ### Panel Controls
 

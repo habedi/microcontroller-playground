@@ -147,14 +147,10 @@ void face_render_graph(const struct face_surface *s,
 
   face_sprite_clear(s, C_BG);
 
-  /* Central telemetry reticle */
-
   {
     int cx = s->width / 2;
     int cy = s->height / 2;
     int r_hub = (side * 10) / 100;
-
-    /* Faint inner telemetry ring */
 
     for (i = 0; i < 360; i += 15)
       {
@@ -162,8 +158,6 @@ void face_render_graph(const struct face_surface *s,
         int ry = cy + (r_hub * g_ring[i % FACE_NSTATES][1]) / 1000;
         put(s, rx, ry, C_EDGE);
       }
-
-    /* Crosshair ticks */
 
     line(s, cx - r_hub - 4, cy, cx - r_hub + 2, cy, C_EDGE);
     line(s, cx + r_hub - 2, cy, cx + r_hub + 4, cy, C_EDGE);
@@ -189,8 +183,6 @@ void face_render_graph(const struct face_surface *s,
         }
     }
 
-  /* Animated telemetry data packets flowing along active edges */
-
   for (j = 0; j < FACE_NSTATES; j++)
     {
       if (j != (int)state)
@@ -200,8 +192,6 @@ void face_render_graph(const struct face_surface *s,
 
           face_graph_node((int)state, s->width, s->height, &x0, &y0);
           face_graph_node(j, s->width, s->height, &x1, &y1);
-
-          /* Flow from connected nodes toward active node */
 
           t = 20 + (int)((now_ms / 12 + (uint32_t)j * 18) % 60);
           px = x1 + ((x0 - x1) * t) / 100;

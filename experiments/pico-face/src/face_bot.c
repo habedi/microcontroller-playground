@@ -181,8 +181,6 @@ static int round_rect_half(int half_w, int half_h, int r, int dy)
   return half_w - (r - (int)isqrt32((uint32_t)(r * r - over * over)));
 }
 
-/* Draws an error X eye for the failed state */
-
 static void draw_bot_x_eye(const struct face_surface *s, int cx, int cy,
                            int w, int h, const struct bot_colors *col)
 {
@@ -206,8 +204,6 @@ static void draw_bot_x_eye(const struct face_surface *s, int cx, int cy,
       span(s, y, cx - x_diag - 1, cx - x_diag + 1, col->core);
     }
 }
-
-/* Draws a happy curved chevron eye for the done state */
 
 static void draw_bot_arch_eye(const struct face_surface *s, int cx, int cy,
                              int w, int h, const struct bot_colors *col)
@@ -234,8 +230,6 @@ static void draw_bot_arch_eye(const struct face_surface *s, int cx, int cy,
       span(s, apex + 2, cx + dx, cx + dx, col->eye);
     }
 }
-
-/* Draws one robot eye capsule with optional top brow tilt and bottom smile cut */
 
 static void draw_bot_eye(const struct face_surface *s, int cx, int cy,
                          int w, int h, int tilt, int smile,
@@ -381,8 +375,6 @@ void face_render_bot(const struct face_surface *s,
       uint16_t beacon_col;
       int y;
 
-      /* Outer rounded bezel */
-
       span(s, 6, 8, s->width - 9, col->frame);
       span(s, s->height - 7, 8, s->width - 9, col->frame);
       for (y = 8; y < s->height - 8; y++)
@@ -391,21 +383,15 @@ void face_render_bot(const struct face_surface *s,
           span(s, y, s->width - 7, s->width - 7, col->frame);
         }
 
-      /* Corner accent rivets */
-
       span(s, 8, 8, 9, col->frame_hi);
       span(s, 8, s->width - 10, s->width - 9, col->frame_hi);
       span(s, s->height - 9, 8, 9, col->frame_hi);
       span(s, s->height - 9, s->width - 10, s->width - 9, col->frame_hi);
 
-      /* Antenna stem */
-
       for (y = 10; y <= 18; y++)
         {
           span(s, y, mid_x - 1, mid_x + 1, col->frame_hi);
         }
-
-      /* Antenna beacon light */
 
       if (state == FACE_FAILED)
         {
@@ -438,8 +424,6 @@ void face_render_bot(const struct face_surface *s,
       span(s, 8, mid_x - 3, mid_x + 3, beacon_col);
       span(s, 9, mid_x - 2, mid_x + 2, beacon_col);
       span(s, 8, mid_x - 1, mid_x + 1, col->core);
-
-      /* Segmented activity meter below eyes on editing or working */
 
       if (state == FACE_EDITING || state == FACE_WORKING)
         {
