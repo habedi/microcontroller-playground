@@ -287,11 +287,11 @@ static void test_crab_smile_points_the_right_way(void)
 
   face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
 
-  /* The ink colour is read back from a glasses frame cell, so the test does
+  /* The ink colour is read back from the glasses bridge, so the test does
    * not have to know the crab's palette.
    */
 
-  line = g_pixels[(size_t)CRAB(17) * PANEL + (size_t)CRAB(10)];
+  line = g_pixels[114 * PANEL + 120];
 
   mid = first_row_of(&surf, CRAB(20), CRAB(24), CRAB(33), line);
   end = first_row_of(&surf, CRAB(15), CRAB(24), CRAB(33), line);
@@ -317,7 +317,7 @@ static void test_crab_is_angrier_than_the_pose(void)
   p.eye_open_r = FACE_UNIT;
 
   face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
-  line = g_pixels[(size_t)CRAB(17) * PANEL + (size_t)CRAB(10)];
+  line = g_pixels[114 * PANEL + 120];
 
   /* Left brow, cells 10 to 17, above the frame's top edge at cell 17. */
 
@@ -325,6 +325,52 @@ static void test_crab_is_angrier_than_the_pose(void)
   inner = first_row_of(&surf, CRAB(17), CRAB(9), CRAB(17), line);
   check(outer > 0 && inner > 0, "the crab drew both brow ends");
   check(inner > outer, "a resting crab lowers its inner brow ends");
+}
+
+static void test_crab_small_gaze_moves(void)
+{
+  struct face_surface surf = panel();
+  static uint16_t centred[PANEL * PANEL];
+  struct face_dirty dirty;
+  struct face_pose p;
+  static const int16_t offsets[][2] = {{200, 0}, {0, -200}};
+  size_t i;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = FACE_UNIT;
+  p.eye_open_r = FACE_UNIT;
+  face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+  memcpy(centred, g_pixels, sizeof(centred));
+
+  for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++)
+    {
+      p.pupil_x = offsets[i][0];
+      p.pupil_y = offsets[i][1];
+      face_render_crab(&surf, &p, FACE_IDLE, 0, 0, &dirty);
+      check(memcmp(centred, g_pixels, sizeof(centred)) != 0,
+            "a small horizontal or upward crab gaze is visible");
+    }
+}
+
+static void test_crab_claws_have_intermediate_frames(void)
+{
+  struct face_surface surf = panel();
+  static uint16_t start[PANEL * PANEL];
+  static uint16_t peak[PANEL * PANEL];
+  struct face_dirty dirty;
+  struct face_pose p;
+
+  memset(&p, 0, sizeof(p));
+  p.eye_open_l = 620;
+  p.eye_open_r = 620;
+  face_render_crab(&surf, &p, FACE_WORKING, 0, 0, &dirty);
+  memcpy(start, g_pixels, sizeof(start));
+  face_render_crab(&surf, &p, FACE_WORKING, 280, 0, &dirty);
+  memcpy(peak, g_pixels, sizeof(peak));
+  face_render_crab(&surf, &p, FACE_WORKING, 140, 0, &dirty);
+  check(memcmp(start, g_pixels, sizeof(start)) != 0 &&
+        memcmp(peak, g_pixels, sizeof(peak)) != 0,
+        "the claw cycle has an intermediate position");
 }
 
 /* The penguin's beak opens with the mouth: an open one shows its dark inside
@@ -464,6 +510,8 @@ int main(void)
   test_pixel_brow_tilts_the_right_way();
   test_crab_smile_points_the_right_way();
   test_crab_is_angrier_than_the_pose();
+  test_crab_small_gaze_moves();
+  test_crab_claws_have_intermediate_frames();
   test_penguin_beak_opens();
   test_penguin_sways();
   test_graph_marks_the_current_state();

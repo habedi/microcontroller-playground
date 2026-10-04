@@ -370,8 +370,6 @@ static void dim_surface(const struct face_surface *s, int percent)
     }
 }
 
-/* Applies one button action to the settings. */
-
 static void apply(struct ui *ui, enum face_action action)
 {
   switch (action)

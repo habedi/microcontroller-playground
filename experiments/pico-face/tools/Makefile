@@ -12,7 +12,7 @@ SRC   = ../src
 # Renders the contact sheet, then converts it to PNG so any viewer opens it.
 
 preview: $(BUILD)/preview
-	$(BUILD)/preview $(WHEN) $(PALETTE) > $(BUILD)/faces.ppm
+	$(BUILD)/preview $(or $(WHEN),500) $(or $(PALETTE),0) $(PRESET) $(STEP) > $(BUILD)/faces.ppm
 	python3 ppm2png.py $(BUILD)/faces.ppm $(BUILD)/faces.png
 	@echo "wrote $(BUILD)/faces.png"
 
