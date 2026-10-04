@@ -124,6 +124,22 @@ animation at a different moment, and `PALETTE=<0 to 2>` to see the other colour
 sets. This is where the art is worth judging, since a round here costs nothing
 and a round on the board costs a BOOTSEL press.
 
+Pass `PRESET=crab` to show just the crab. Add `WHEN=0 STEP=80` to show eight
+moments of each state's transition from idle, one state per row. For a blink
+sequence, use `WHEN=2200 STEP=25 PRESET=crab`. Each column advances by `STEP`
+milliseconds, so small movements and abrupt changes can be checked on the host.
+
+The crab keeps its original square eyes, glasses, mouth, and dotted stubble.
+Its pupils and eyelids move at panel-pixel precision, so small pupil movements
+and upward glances are visible. Working and editing alternate the claws with
+eased movement. The shared state transitions ease in and out, and idle blinks
+close faster than they reopen. The first artwork revision was flashed to the
+Pico 2 WH and ran, but its face looked worse on the panel. The original face
+artwork has been restored while keeping the animation changes. The restored
+revision was also flashed to the Pico 2 WH. NuttX returned a prompt, and the
+`face` task ran with the crab preset in `working`. The user confirmed the
+restored revision on the panel.
+
 ### Build and Flash
 
 The application lives here rather than in `external/nuttx-apps`, and NuttX

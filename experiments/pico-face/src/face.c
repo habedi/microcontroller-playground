@@ -25,7 +25,8 @@
 /* Idle blinks on this period, and each blink lasts this long. */
 
 #define BLINK_PERIOD_MS 3200
-#define BLINK_MS        150
+#define BLINK_MS        180
+#define BLINK_CLOSE_MS   50
 
 /* Shifts the blink phase so the face does not blink the instant it starts. */
 
@@ -140,19 +141,19 @@ static int32_t wave(uint32_t now_ms, uint32_t period_ms, int32_t amplitude)
 static int32_t blink(uint32_t now_ms, int32_t open)
 {
   uint32_t p = (now_ms + BLINK_OFFSET_MS) % BLINK_PERIOD_MS;
-  int32_t half = BLINK_MS / 2;
 
   if (p >= BLINK_MS)
     {
       return open;
     }
 
-  if ((int32_t)p < half)
+  if (p < BLINK_CLOSE_MS)
     {
-      return open - (open * (int32_t)p) / half;
+      return open - (open * (int32_t)p) / BLINK_CLOSE_MS;
     }
 
-  return (open * ((int32_t)p - half)) / half;
+  return (open * (int32_t)(p - BLINK_CLOSE_MS))
+         / (BLINK_MS - BLINK_CLOSE_MS);
 }
 
 /* The pose a state wants at a given time, before any blending.  This is the
@@ -291,6 +292,11 @@ void face_tick(struct face *f, uint32_t now_ms)
   elapsed = now_ms >= f->state_ms ? now_ms - f->state_ms : 0;
   frac    = elapsed >= FACE_BLEND_MS ? FACE_UNIT
             : (int32_t)((elapsed * FACE_UNIT) / FACE_BLEND_MS);
+
+  /* Smoothstep keeps the start and end of a transition gentle. */
+
+  frac = (frac * frac / FACE_UNIT) * (3 * FACE_UNIT - 2 * frac)
+         / FACE_UNIT;
 
   target_pose(f->state, now_ms, &to);
 
