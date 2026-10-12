@@ -26,9 +26,7 @@ import os
 import subprocess
 import sys
 
-# Deliberately not tempfile.gettempdir(), which follows TMPDIR. The hook and
-# the pusher have to agree on this path, and TMPDIR is not the same in every
-# context a hook runs from.
+# Fixed runtime directory shared across hook and pusher contexts.
 _RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
 
 SPOOL = os.path.join(_RUNTIME, "claude-face.state")
@@ -138,8 +136,7 @@ def push() -> None:
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        # Someone else is talking to the board and will pick up the newest
-        # word from the spool file. Dropping this one costs nothing.
+        # Port busy; lock holder will consume latest spooled state.
         return
 
     try:
@@ -155,9 +152,7 @@ def push() -> None:
         if not os.path.exists(board.PORT):
             return
 
-        # A hook that fired while this copy held the lock gave up and left
-        # its word in the spool file, so keep going until the word read
-        # before a push is still the word there after it.
+        # Loop until latest spooled word has been sent.
         sent = None
         while True:
             with open(SPOOL, encoding="utf-8") as spooled:
@@ -166,8 +161,7 @@ def push() -> None:
             if not word or word == sent:
                 return
 
-            # face() starts the render loop when it is not running, which is
-            # what makes the first event of a session do something visible.
+            # Starts the board render loop if not already running.
             board.face(word)
             sent = word
     finally:

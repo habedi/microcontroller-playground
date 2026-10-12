@@ -150,6 +150,28 @@ static void test_idle_blinks(void)
   check(open > shut * 4, "idle spends far more time open than shut");
 }
 
+static void test_animation_timing(void)
+{
+  struct face f;
+  int closing;
+
+  face_init(&f, 0);
+  face_set_state(&f, FACE_WAITING, 0);
+  face_tick(&f, FACE_BLEND_MS / 4);
+  check(f.pose.brow > 0 && f.pose.brow < 120,
+        "a transition starts gently");
+  face_tick(&f, FACE_BLEND_MS * 3 / 4);
+  check(f.pose.brow > 480 && f.pose.brow < 600,
+        "a transition settles gently");
+
+  face_init(&f, 0);
+  face_tick(&f, 2225);
+  closing = f.pose.eye_open_l;
+  face_tick(&f, 2300);
+  check(f.pose.eye_open_l > 0 && f.pose.eye_open_l < closing,
+        "a blink reopens more slowly than it closes");
+}
+
 /* Working sweeps the pupils.  The test asks only that they move both ways,
  * not for any particular path.
  */
@@ -294,6 +316,7 @@ int main(void)
   test_init_is_idle_and_awake();
   test_state_change_blends();
   test_idle_blinks();
+  test_animation_timing();
   test_working_sweeps_pupils();
   test_waiting_pulses();
   test_states_look_different();

@@ -3,9 +3,17 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    zig-overlay = {
+      url = "github:mitchellh/zig-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, zig-overlay, rust-overlay }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -13,7 +21,10 @@
     {
       devShells = forAllSystems (system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ (import rust-overlay) ];
+          };
 
           commonTools = with pkgs; [
             gnumake
@@ -68,11 +79,19 @@
             riscv32Pkgs.buildPackages.binutils
           ];
 
-          rustZigTools = with pkgs; [
-            rustup
-            zig
-            probe-rs-tools
-            espflash
+          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+            targets = [
+              "thumbv8m.main-none-eabihf"
+              "riscv32imac-unknown-none-elf"
+              "riscv32imafc-unknown-none-elf"
+            ];
+          };
+
+          rustZigTools = [
+            rustToolchain
+            zig-overlay.packages.${system}."0.17.0"
+            pkgs.probe-rs-tools
+            pkgs.espflash
           ];
         in
         {
@@ -86,9 +105,7 @@
               export PICO_SDK_PATH="$PWD/external/pico-sdk"
               export PLAYGROUND_ROOT="$PWD"
 
-              # libffi runs autoreconf, and aclocal needs this to find
-              # libtool's macros. Without it the build fails with
-              # "Libtool library used but LIBTOOL is undefined".
+              # Needed for aclocal to locate libtool macros during autoreconf.
               export ACLOCAL_PATH="${pkgs.libtool}/share/aclocal''${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
             '';
           };

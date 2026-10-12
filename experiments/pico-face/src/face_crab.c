@@ -1,11 +1,12 @@
 /****************************************************************************
  * experiments/pico-face/src/face_crab.c
  *
- * Crab preset: shapes on a 40 by 40 grid.
+ * Crab preset: a grid body with finer facial details.
  *
  ****************************************************************************/
 
 #include <stddef.h>
+#include <stdlib.h>
 
 #include "face_preset.h"
 #include "face_sprite.h"
@@ -162,6 +163,33 @@ static void leg(const struct face_surface *s, int scale, int x0, int y0,
   limb(s, scale, x0, y0, x1, y1, thick, C_SHELL);
 }
 
+/* Panel coordinates let small gaze changes survive the body grid. */
+
+static void detail(const struct face_surface *s, int x, int y,
+                   int w, int h, uint16_t colour)
+{
+  int grid = s->width > s->height ? s->width : s->height;
+
+  face_grid_rect(s, grid, 1, x, y, w, h, colour);
+}
+
+static void stroke(const struct face_surface *s, int x0, int y0,
+                   int x1, int y1, int thick, uint16_t colour)
+{
+  int dx = x1 - x0;
+  int dy = y1 - y0;
+  int steps = abs(dx) > abs(dy) ? abs(dx) : abs(dy);
+  int i;
+
+  for (i = 0; i <= steps; i++)
+    {
+      int x = x0 + (steps ? dx * i / steps : 0);
+      int y = y0 + (steps ? dy * i / steps : 0);
+
+      detail(s, x - thick / 2, y - thick / 2, thick, thick, colour);
+    }
+}
+
 /* One claw with its arm, mirrored for the right side.  lift raises it,
  * which is what the crab does when it is angrier than usual.
  */
@@ -169,46 +197,62 @@ static void leg(const struct face_surface *s, int scale, int x0, int y0,
 static void claw(const struct face_surface *s, int scale, int mirror,
                  int lift)
 {
-  int cx = mirror ? GRID - 1 - 7 : 7;
-  int cy = 8 - lift;
-  int shoulder = mirror ? GRID - 1 - 10 : 10;
+  int cx = (mirror ? 32 : 7) * scale;
+  int cy = (mirror ? 10 : 11) * scale - lift;
+  int shoulder = (mirror ? 29 : 10) * scale;
+  int thick = scale / 2 + 1;
   int i;
 
   /* The arm, from the shoulder of the shell up to the claw. */
 
-  leg(s, scale, shoulder, 17, cx, cy + 5, 2);
+  stroke(s, shoulder, 17 * scale, cx, cy + 5 * scale,
+         3 * scale, C_LINE);
+  stroke(s, shoulder, 17 * scale, cx, cy + 5 * scale,
+         2 * scale, C_SHELL);
 
-  /* A mitten shaped claw: tall oval with a white zigzag for the gap between
-   * the pincers, and a highlight on the outer side.
-   */
+  face_grid_ellipse(s, GRID * scale, 1, cx, cy,
+                    4 * scale, 6 * scale, C_LINE);
+  face_grid_ellipse(s, GRID * scale, 1, cx, cy,
+                    4 * scale - thick, 6 * scale - thick, C_SHELL);
 
-  ellipse(s, scale, cx, cy, 6, 7, C_LINE);
-  ellipse(s, scale, cx, cy, 5, 6, C_SHELL);
-  ellipse(s, scale, mirror ? cx + 2 : cx - 2, cy - 2, 2, 3, C_LIGHT);
+  /* The left claw has a seam; the right has an open, toothed gap. */
 
-  for (i = -5; i <= 3; i++)
+  for (i = -5 * scale; i <= 3 * scale; i++)
     {
-      int zig = (i & 1) ? (mirror ? 1 : -1) : 0;
+      int phase = (i + 5 * scale) % (2 * scale);
+      int zig = phase < scale ? phase : 2 * scale - phase;
+      int gap = mirror ? (3 * scale - i) / 3 : thick;
 
-      rect(s, scale, cx + zig, cy + i, 1, 1, C_WHITE);
+      detail(s, cx - zig, cy + i, gap + thick, 1, C_INK);
+      if (mirror && gap > thick)
+        {
+          detail(s, cx - zig + thick / 2, cy + i,
+                 gap, 1, C_BG);
+        }
     }
 }
 
 static void eye(const struct face_surface *s, int scale, int x, int open,
                 int px, int py)
 {
-  int lid = (4 * (FACE_UNIT - clampi(open, 0, FACE_UNIT))) / FACE_UNIT;
+  int lid = (4 * scale * (FACE_UNIT - clampi(open, 0, FACE_UNIT)))
+            / FACE_UNIT;
 
-  /* Red rim, white, and a pupil that follows the gaze. */
+  px = clampi(px * scale / FACE_UNIT, -scale, scale);
+  py = clampi(py * scale / FACE_UNIT, -scale, scale);
+
+  /* Keep the square eyes, but move pupils and lids in panel pixels. */
 
   rect(s, scale, x, 18, 7, 4, C_RIM);
   rect(s, scale, x + 1, 18, 5, 4, C_WHITE);
-  rect(s, scale, x + 2 + px, 19 + py, 2, 2, C_INK);
+  detail(s, (x + 2) * scale + px, 19 * scale + py,
+         2 * scale, 2 * scale, C_INK);
 
   if (lid > 0)
     {
-      rect(s, scale, x, 18, 7, lid, C_SHELL);
-      rect(s, scale, x, 17 + lid, 7, 1, C_INK);
+      detail(s, x * scale, 18 * scale, 7 * scale, lid, C_SHELL);
+      detail(s, x * scale, 18 * scale + (lid > scale ? lid - scale : 0),
+             7 * scale, scale, C_INK);
     }
 }
 
@@ -225,7 +269,7 @@ void face_render_crab(const struct face_surface *s,
 {
   int scale = s->width / GRID;
   int brow = clampi(pose->brow - ANGER_BIAS, -FACE_UNIT, FACE_UNIT);
-  int lift = clampi(-brow * 2 / FACE_UNIT, 0, 2);
+  int lift;
   int pal_idx = palette % FACE_NPALETTES;
   int typing_l = 0;
   int typing_r = 0;
@@ -243,21 +287,36 @@ void face_render_crab(const struct face_surface *s,
 
   g_crab_colors = &g_crab_palettes[pal_idx];
 
-  if (state == FACE_WORKING)
-    {
-      int step = (now_ms / 140) & 1;
-      typing_l = step ? 2 : 0;
-      typing_r = step ? 0 : 2;
-    }
-  else if (state == FACE_FAILED)
-    {
-      typing_l = 2;
-      typing_r = 2;
-    }
-
   if (scale < 1)
     {
       scale = 1;
+    }
+
+  lift = clampi(-brow * 2 * scale / FACE_UNIT, 0, 2 * scale);
+
+  if (state == FACE_WORKING || state == FACE_EDITING)
+    {
+      int period = state == FACE_WORKING ? 560 : 800;
+      int phase = (int)(now_ms % period) * FACE_UNIT / period;
+      int ramp = phase < FACE_UNIT / 2 ? phase * 2
+                 : (FACE_UNIT - phase) * 2;
+      int eased = ramp * ramp / FACE_UNIT
+                  * (3 * FACE_UNIT - 2 * ramp) / FACE_UNIT;
+      int activity = state == FACE_WORKING
+                     ? (FACE_UNIT - pose->eye_open_l) * FACE_UNIT / 380
+                     : pose->pupil_y * FACE_UNIT / 820;
+
+      activity = clampi(activity, 0, FACE_UNIT);
+
+      typing_l = eased * 2 * scale / FACE_UNIT * activity / FACE_UNIT;
+      typing_r = (FACE_UNIT - eased) * 2 * scale / FACE_UNIT
+                 * activity / FACE_UNIT;
+    }
+  else if (state == FACE_FAILED)
+    {
+      typing_l = clampi((FACE_UNIT - pose->eye_open_l)
+                        * 2 * scale / 720, 0, 2 * scale);
+      typing_r = typing_l;
     }
 
   face_sprite_clear(s, C_BG);
@@ -307,8 +366,6 @@ void face_render_crab(const struct face_surface *s,
   rect(s, scale, 24, 31, 1, 1, C_SHADE);
   rect(s, scale, 26, 30, 1, 1, C_SHADE);
 
-  /* Weathered barnacle markings on upper carapace */
-
   rect(s, scale, 27, 13, 2, 1, C_LIGHT);
   rect(s, scale, 28, 14, 1, 1, C_SHADE);
 
@@ -324,12 +381,8 @@ void face_render_crab(const struct face_surface *s,
   rect(s, scale, 7, 19, 3, 1, C_INK);
   rect(s, scale, 30, 19, 3, 1, C_INK);
 
-  /* Glint on glasses corner */
-
   rect(s, scale, 11, 18, 1, 1, C_WHITE);
   rect(s, scale, 22, 18, 1, 1, C_WHITE);
-
-  /* Steam puffs from shell vents on failure */
 
   if (state == FACE_FAILED)
     {
@@ -341,15 +394,11 @@ void face_render_crab(const struct face_surface *s,
       rect(s, scale, 35, 16, 1, 1, C_LIGHT);
     }
 
-  /* Editing stylus in right claw */
-
   if (state == FACE_EDITING)
     {
       rect(s, scale, 33, 3, 1, 4, C_TEETH);
       rect(s, scale, 33, 1, 1, 2, C_WHITE);
     }
-
-  /* Victory sparkles and rosy cheeks on done */
 
   if (state == FACE_DONE)
     {
@@ -362,8 +411,8 @@ void face_render_crab(const struct face_surface *s,
       rect(s, scale, 30, 23, 2, 1, C_LIGHT);
     }
 
-  px = clampi(pose->pupil_x / (FACE_UNIT / 2 + 1), -1, 1);
-  py = clampi(pose->pupil_y / (FACE_UNIT / 2 + 1), 0, 1);
+  px = pose->pupil_x;
+  py = pose->pupil_y;
 
   eye(s, scale, 11, pose->eye_open_l, px, py);
   eye(s, scale, 22, pose->eye_open_r, px, py);

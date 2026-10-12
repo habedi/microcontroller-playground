@@ -29,9 +29,9 @@ make shell
 ```
 
 > [!IMPORTANT]
-> The first `make shell` builds the RISC-V cross-compiler toolchain from source, which can take some time.
-> When the first build is done, run `make shell-pin`, so a Nix garbage collection does not discard the build results.
-> The Espressif boards also need `make install`, which installs esptool. Note that the Raspberry Pi Pico 2 does not need it.
+> The first `make shell` builds the RISC-V cross-compiler from source.
+> Run `make shell-pin` afterward to protect it from Nix garbage collection.
+> Espressif boards also needs `make install` for esptool.
 
 #### 3. Build and run on the Pico 2
 
@@ -42,19 +42,17 @@ make flash-pico-uf2             # Hold the BOOTSEL button pressed down while plu
 make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
 ```
 
-Press Enter twice after the console opens to get the `nsh>` prompt.
-The first Enter only echoes, and the session starts on the second one.
+Press Enter twice after opening the console to reach the `nsh>` prompt.
 
 <div align="center">
   <img alt="NuttShell" src="docs/assets/images/pico2w-nsh-1.jpeg" width="100%">
 </div>
 
-The `usbnsh` configuration puts the NuttShell on the USB cable, so no extra hardware is needed.
-The `nsh` configuration puts it on UART0 (at GP0 and GP1 pins), which needs a USB to UART adapter.
+The `usbnsh` configuration provides a console over USB.
+The `nsh` configuration routes to UART0 pins GP0 and GP1 via a USB-to-UART adapter.
 
-Both flash targets need the board in BOOTSEL mode.
-`make flash-pico-uf2` copies the image to the drive that the board exposes, and needs no special permissions.
-`make flash-pico` uses picotool, which needs the udev rules that `make setup-udev` installs once.
+Flashing needs BOOTSEL mode;
+`make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (which needs `make setup-udev`).
 
 #### 4. Build and run on the ESP32-P4
 
@@ -66,19 +64,13 @@ make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
 ```
 
-The board's USB-C port connects to an onboard WCH CH343 USB to UART bridge on UART0
-(GPIO 37 and GPIO 38), appearing as `/dev/ttyACM0` with USB vendor `1a86`.
+> [!NOTE]
+> The onboard WCH CH343 bridge links UART0 (GPIO 37 and GPIO 38) to `/dev/ttyACM0`.
 
 > [!NOTE]
-> An ESP32-P4 with a silicon revision below v3.0 halts in the revision check that the stock configuration compiles in.
-> Configure such a chip from the saved configuration instead, with
-> `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
-> It sets `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100` and boots to an interactive NuttShell on UART0.
-
-> [!NOTE]
-> Serial access needs membership in the `dialout` group.
-> Run `sudo usermod -aG dialout $USER`, then log in again.
-> If you are not a member of the group, you will not have permission to access the serial port.
+> ESP32-P4 silicon revisions below v3.0 need configuring via
+> `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the revision check.
+> Serial access needs membership in the `dialout` group (can be added by running `sudo usermod -aG dialout $USER`).
 
 ---
 

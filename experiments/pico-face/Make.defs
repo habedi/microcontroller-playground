@@ -1,8 +1,7 @@
 ############################################################################
 # experiments/pico-face/Make.defs
 #
-# Reached through the apps/external symlink, which is why the path below is
-# $(APPDIR)/external rather than the name of this directory.
+# Configured via $(APPDIR)/external symlink.
 #
 ############################################################################
 

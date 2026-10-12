@@ -11,8 +11,7 @@ pico_sdk_init()
 
 add_executable(hello main.c)
 
-# The console goes over the USB cable, because the Pico 2 W has no LED on a
-# GPIO pin and no UART adapter is needed this way.
+# Console over USB; Pico 2 W has no onboard GPIO LED.
 pico_enable_stdio_usb(hello 1)
 pico_enable_stdio_uart(hello 0)
 

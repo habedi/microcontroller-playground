@@ -1,45 +1,31 @@
 NUTTX_DIR ?= external/nuttx
 BOARD     ?= esp32p4-function-ev-board:nsh
-# The RISC-V toolchain in the dev shell is built from source, so a garbage
-# collection would cost an hour to undo. This profile is a GC root.
+# Nix dev shell profile kept as a GC root for the RISC-V toolchain.
 DEVSHELL_PROFILE ?= .nix-devshell-profile
 PORT      ?= /dev/ttyUSB0
 TTY       ?= /dev/ttyACM0
 BAUD      ?= 115200
 UF2       ?= $(NUTTX_DIR)/nuttx.uf2
 
-# A Pico in BOOTSEL mode mounts as a mass storage device. The Pico 2 labels the
-# volume RP2350, and the original Pico labels it RPI-RP2. Copying a UF2 there
-# flashes the board without the udev rules that picotool needs.
+# Pico mass storage mount in BOOTSEL mode (RP2350 or RPI-RP2).
 PICO_MOUNT ?= $(shell findmnt -rn -o TARGET -S LABEL=RP2350 2>/dev/null || \
   findmnt -rn -o TARGET -S LABEL=RPI-RP2 2>/dev/null)
 
-# A configuration saved under configs/nuttx/<board>/<name>. The board name
-# comes from the path, and any in-tree configuration of that board serves as
-# the scaffold, because the saved defconfig then replaces the generated one.
-# NuttX strips CONFIG_APPS_DIR when it writes a defconfig, so it has to go
-# back in before olddefconfig fills in the remaining defaults.
+# Saved NuttX defconfig path under configs/nuttx/<board>/<name>.
 SAVED_CONFIG   ?=
 SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
 NUTTX_APPS_DIR ?= ../nuttx-apps
 
-# Each entry is <submodule directory>:<patch directory>. A patch that must
-# survive lives here rather than as a commit inside the submodule.
-# NUTTX_APPS_DIR is relative to the kernel tree, because CONFIG_APPS_DIR needs
-# it that way. The patch sets use a repository-relative path instead.
+# Submodule patch mappings: <submodule directory>:<patch directory>.
 PATCH_SETS = $(NUTTX_DIR):patches/nuttx external/nuttx-apps:patches/nuttx-apps
 
-# The Pico SDK, a second SDK alongside NuttX. A project is any directory with a
-# CMakeLists.txt, so PICOSDK_SRC points at one under experiments/.
+# Pico SDK project configuration.
 PICOSDK_DIR    ?= external/pico-sdk
 PICOSDK_BOARD  ?= pico2_w
 PICOSDK_SRC    ?= experiments/picosdk-hello
 PICOSDK_BUILD  ?= build/picosdk/$(notdir $(PICOSDK_SRC))
 
-# ESP-IDF, the Espressif SDK. It is the practical option for the ESP32-P4,
-# whose NuttX console does not reach a shell. IDF_TOOLS_PATH keeps the
-# downloaded toolchains inside the repository rather than in the home
-# directory, so a clean checkout is self contained.
+# ESP-IDF toolchain and build directories.
 ESPIDF_DIR    ?= external/esp-idf
 ESPIDF_TOOLS  ?= $(CURDIR)/build/espressif
 ESPIDF_TARGET ?= esp32p4
@@ -47,37 +33,22 @@ ESPIDF_SRC    ?= experiments/espidf-hello
 ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
 ESPIDF_PORT   ?= /dev/ttyACM0
 
-# The onboard ESP32-C6 is reached with a 3.3 V USB to UART adapter, which
-# appears as /dev/ttyUSB0 rather than /dev/ttyACM0. This board exposes the C6
-# only as solder pads, so the joints have to be soldered. No ESP32-P4 GPIO
-# reaches the C6's bootstrap either, so it cannot be flashed from the P4. See
-# docs/esp32p4.md.
+# Serial port and build directory for the onboard ESP32-C6.
 C6_PORT       ?= /dev/ttyUSB0
 C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
 
-# idf.py writes the resolved sdkconfig next to the project by default. Sending
-# it to the build directory keeps generated files out of the repository, at the
-# cost of losing menuconfig edits on espidf-distclean. sdkconfig.defaults in
-# the project directory is the file to edit for changes worth keeping.
+# Store resolved sdkconfig in the build directory.
 ESPIDF_ARGS   ?= -C $(ESPIDF_SRC) -B $(ESPIDF_BUILD) \
                  -D SDKCONFIG=$(ESPIDF_BUILD)/sdkconfig
 
-# The CYW43439 blob that a wireless build embeds. The NuttX board build writes
-# a dummy in its place when it is missing, and the resulting image runs but
-# never talks to the wireless chip, so the build checks for it.
+# CYW43439 wireless firmware blob checked during wireless NuttX builds.
 CYW43_FIRMWARE ?= \
   external/pico-sdk/lib/cyw43-driver/firmware/43439A0-7.95.49.00.combined
 
 # The architecture of the current NuttX configuration, empty when the tree is not configured yet.
 NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
 
-# NuttX takes its command prefix from the board configuration, and the
-# Espressif boards ask for riscv64-unknown-elf-. A RISC-V build points NuttX at
-# whichever usable compiler is on PATH instead, like riscv32-none-elf- from the Nix
-# dev shell, or riscv32-esp-elf- from the toolchain Espressif publishes, which
-# is what CI installs. The Debian riscv64-unknown-elf package cannot build
-# these boards, because it ships no C library, and the Espressif HAL needs
-# sys/lock.h from one.
+# Select available 32-bit RISC-V cross-compiler prefix from PATH.
 ifeq ($(NUTTX_ARCH),risc-v)
   ifeq ($(origin CROSSDEV),undefined)
     CROSSDEV := $(shell \
@@ -155,13 +126,7 @@ setup-hooks: ## Install Git hooks (pre-commit and pre-push)
 test-hooks: ## Run the Git hooks on all files
 	uv run pre-commit run --all-files --hook-stage pre-push
 
-# NuttX. A second OS gets its own prefixed group (zephyr-build, and so on).
-#
-# The patches in a set stack: a later one may edit lines an earlier one added,
-# so the earlier one no longer reverses on its own once the later one is on.
-# A patch that applies in neither direction is therefore taken as applied when
-# every file it touches is already modified or added in the tree. The reverse
-# check is still tried first, since it is the stricter answer when it works.
+# Apply stacked patches under patches/ to submodules.
 .PHONY: nuttx-patch
 nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 	@for set in $(PATCH_SETS); do \
@@ -195,7 +160,7 @@ nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
 		done; \
 	done
 
-# Reverted last to first, since a later patch may sit on top of an earlier one.
+# Revert patches in reverse order.
 .PHONY: nuttx-unpatch
 nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
 	@for set in $(PATCH_SETS); do \
@@ -214,10 +179,7 @@ nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
 		done; \
 	done
 
-# A branch switch or a hard reset reverts only the tracked edits. A file the
-# patch added stays behind. The patch then applies in neither direction: forward
-# fails because the file exists, reverse fails because the edits are gone. This
-# target clears that state.
+# Reset patches and clear untracked files left by reverted patches.
 .PHONY: nuttx-repatch
 nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent state
 
@@ -225,10 +187,7 @@ nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent st
 cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs
 	uv run python tools/cyw43-firmware.py
 
-# Out-of-tree NuttX application.  nuttx-apps looks for apps/external and its
-# own .gitignore covers that name, so the symlink leaves the submodule clean
-# and the Kconfig generator picks the directory up on its own.
-
+# Symlink out-of-tree application into external/nuttx-apps/external.
 EXTERNAL_APP ?= experiments/pico-face
 
 .PHONY: nuttx-link-app
