@@ -52,7 +52,7 @@ The `usbnsh` configuration provides a console over USB.
 The `nsh` configuration routes to UART0 pins GP0 and GP1 via a USB-to-UART adapter.
 
 Flashing needs BOOTSEL mode;
-`make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (needs `make setup-udev`).
+`make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (which needs `make setup-udev`).
 
 #### 4. Build and run on the ESP32-P4
 
