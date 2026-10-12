@@ -48,9 +48,11 @@ Press Enter twice after opening the console to reach the `nsh>` prompt.
   <img alt="NuttShell" src="docs/assets/images/pico2w-nsh-1.jpeg" width="100%">
 </div>
 
-The `usbnsh` configuration provides a console over USB. The `nsh` configuration routes to UART0 pins GP0 and GP1 via a USB-to-UART adapter.
+The `usbnsh` configuration provides a console over USB.
+The `nsh` configuration routes to UART0 pins GP0 and GP1 via a USB-to-UART adapter.
 
-Flashing requires BOOTSEL mode: `make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (requires `make setup-udev`).
+Flashing needs BOOTSEL mode;
+`make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (needs `make setup-udev`).
 
 #### 4. Build and run on the ESP32-P4
 
@@ -62,10 +64,13 @@ make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
 ```
 
-The onboard WCH CH343 bridge links UART0 (GPIO 37 and GPIO 38) to `/dev/ttyACM0` (vendor `1a86`).
+> [!NOTE]
+> The onboard WCH CH343 bridge links UART0 (GPIO 37 and GPIO 38) to `/dev/ttyACM0`.
 
 > [!NOTE]
-> ESP32-P4 silicon revisions below v3.0 need configuring via `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the revision check. Serial access requires membership in the `dialout` group (`sudo usermod -aG dialout $USER`).
+> ESP32-P4 silicon revisions below v3.0 need configuring via
+> `make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the revision check.
+> Serial access needs membership in the `dialout` group (can be added by running `sudo usermod -aG dialout $USER`).
 
 ---
 
