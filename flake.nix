@@ -86,9 +86,7 @@
               export PICO_SDK_PATH="$PWD/external/pico-sdk"
               export PLAYGROUND_ROOT="$PWD"
 
-              # libffi runs autoreconf, and aclocal needs this to find
-              # libtool's macros. Without it the build fails with
-              # "Libtool library used but LIBTOOL is undefined".
+              # Required for aclocal to locate libtool macros during autoreconf.
               export ACLOCAL_PATH="${pkgs.libtool}/share/aclocal''${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
             '';
           };

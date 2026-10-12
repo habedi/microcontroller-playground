@@ -9,8 +9,6 @@ SRC   = ../src
 
 .PHONY: preview stats clean
 
-# Renders the contact sheet, then converts it to PNG so any viewer opens it.
-
 preview: $(BUILD)/preview
 	$(BUILD)/preview $(or $(WHEN),500) $(or $(PALETTE),0) $(PRESET) $(STEP) > $(BUILD)/faces.ppm
 	python3 ppm2png.py $(BUILD)/faces.ppm $(BUILD)/faces.png
@@ -23,8 +21,6 @@ SRCS = $(SRC)/face.c $(SRC)/face_render.c $(SRC)/face_sprite.c \
 
 $(BUILD)/preview: preview.c $(SRCS) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ preview.c $(SRCS)
-
-# Prints the share of the panel sent per frame, per preset and state.
 
 stats: $(BUILD)/stats
 	$(BUILD)/stats

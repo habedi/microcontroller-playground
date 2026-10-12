@@ -1,14 +1,12 @@
-# See experiments/espidf-hello for why these two are needed.
+# Silicon revision v1.3 compatibility options.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
 
-# The console goes to UART0, which the onboard CH343 bridge reaches, so a
-# panic from the PSRAM controller is visible.
+# Primary console on UART0 (onboard CH343 bridge).
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 
-# The point of the experiment. The board carries 32 MB in 16-line mode, and
-# the slowest clock is the most forgiving starting point.
+# 32 MB PSRAM in 16-line mode at 200 MHz.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_HEX=y
 CONFIG_SPIRAM_SPEED_200M=y

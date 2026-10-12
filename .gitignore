@@ -13,17 +13,10 @@ venv/
 .Python
 build/
 
-# ESP-IDF fetches managed components into each project directory, and the path
-# is not configurable. The pin is dependencies.lock, which is committed, so the
-# fetched source stays out of the repository the same way the uv virtual
-# environment does.
+# ESP-IDF managed component sources (pinned by dependencies.lock)
 managed_components/
 
-# NuttX builds an out-of-tree application where its sources live, because it is
-# reached through the apps/external symlink. So object files and dependency
-# lists land under experiments/ rather than under external/ like every other
-# build product. The object file names embed an absolute path, which is a second
-# reason they must never be committed.
+# NuttX out-of-tree application build outputs
 experiments/**/*.o
 experiments/**/Make.dep
 experiments/**/.depend
@@ -88,7 +81,6 @@ out2/
 *.wal
 *.sqlite
 
-# Dependency lock files (uncomment to ignore)
 poetry.lock
 
 # Documentation files
@@ -100,7 +92,6 @@ result-*
 .nix-devshell-profile*
 
 # Miscellaneous files and directories to ignore
-# Add any additional file patterns a directory names that should be ignored down here
 .env
 .claude/
 .codex

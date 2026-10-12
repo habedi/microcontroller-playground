@@ -21,9 +21,7 @@ DEFAULT_HEADER = (
 )
 DEFAULT_OUTPUT = "build/cyw43439-firmware.bin"
 
-# The blob is a few hundred kilobytes. Anything far below that means the header
-# was not what we expected, and shipping it would repeat the dummy-file failure
-# in a new form.
+# Sanity check: valid firmware blob must be at least ~100 KB.
 MINIMUM_SIZE = 100 * 1024
 
 
