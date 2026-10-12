@@ -151,10 +151,11 @@ See `docs/board-mcp.md`.
   The `make nuttx-*` targets read the configured architecture and pass `CROSSDEV=riscv32-none-elf-` when a RISC-V build finds that compiler on PATH,
   so the flag does not belong on the command line. A machine using the Debian `gcc-riscv64-unknown-elf` package, CI included, keeps the NuttX default
   and needs no prefix at all, because that package is multilib and carries the `rv32imac` soft-float variant.
-- Rust experiments use rustup from the dev shell. The targets are `thumbv8m.main-none-eabihf` for the Pico 2, `riscv32imac-unknown-none-elf` for the
-  ESP32-C6, and `riscv32imafc-unknown-none-elf` for the ESP32-P4. Add them with `rustup target add`. Flash firmware with `probe-rs` on the Pico 2
-  and with `espflash` on the Espressif chips. The dev shell provides both.
-- Zig experiments use the `zig` compiler from the dev shell. It cross compiles to all three chips and also serves as a C cross compiler.
+- Rust experiments use the Rust toolchain from the dev shell, provided via `rust-overlay`. The targets are `thumbv8m.main-none-eabihf` for the Pico 2,
+  `riscv32imac-unknown-none-elf` for the ESP32-C6, and `riscv32imafc-unknown-none-elf` for the ESP32-P4. The dev shell pre-installs all three targets.
+  Flash firmware with `probe-rs` on the Pico 2 and with `espflash` on the Espressif chips. The dev shell provides both.
+- Zig experiments use the `zig` compiler (pinned to 0.17.0 via `zig-overlay`) from the dev shell. It cross compiles to all three chips and also
+  serves as a C cross compiler.
 
 ## Adding a Board or an OS
 
