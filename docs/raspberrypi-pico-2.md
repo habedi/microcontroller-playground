@@ -408,7 +408,9 @@ Running a WebAssembly module consumes RAM across four areas:
 - WebAssembly operand stack: `iwasm` defaults to 64 KB (`--stack-size`), but modules that avoid deep recursion
   run comfortably with 8 KB or 16 KB.
 - Linear memory: WebAssembly allocates memory in 64 KB pages. A module declaring `(memory 1)` allocates 64 KB,
-  while `(memory 4)` allocates 256 KB.
+  while `(memory 4)` allocates 256 KB. WebAssembly compilers like `wasm-ld` default to 16 pages (1 MB) for the
+  linear memory C stack, which exceeds physical SRAM; compile with `-Wl,-z,stack-size=4096 -Wl,--initial-memory=65536 -Wl,--max-memory=131072`
+  to constrain it to 1 or 2 pages.
 
 A typical embedded module using one memory page and a 16 KB execution stack uses approximately 100 KB to 120 KB
 of RAM in total, leaving more than 350 KB of free heap on the RP2350. Modules requiring more than 6 pages (384 KB)

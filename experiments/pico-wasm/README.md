@@ -50,7 +50,11 @@ cd experiments/pico-wasm
 make
 ```
 
-The resulting `main.wasm` is 181 bytes and exports `main`, `fib`, and `add`.
+The resulting `main.wasm` is 180 bytes and exports `main`, `fib`, and `add`.
+
+The Makefile sets `-Wl,-z,stack-size=4096 -Wl,--initial-memory=65536 -Wl,--max-memory=131072` so the module
+requests 1 page (64 KB) initial memory instead of the `wasm-ld` default of 16 pages (1 MB), which would
+exceed the RP2350's 512 KB SRAM and fail with `allocate linear memory failed`.
 
 ### Transfer Without Reflashing
 
@@ -83,18 +87,19 @@ Run the default `main()` function:
 nsh> iwasm /data/main.wasm
 ```
 
-Execute specific exported functions with arguments:
-
 ```text
 nsh> iwasm -f add /data/main.wasm 15 27
-42
+0x2a:i32
 
 nsh> iwasm -f fib /data/main.wasm 10
-55
+0x37:i32
 ```
+
+`0x2a` is 42 (15 + 27), and `0x37` is 55 (`fib(10)`).
 
 ### What It Showed
 
-- WAMR loaded and parsed the 181 byte `.wasm` module directly from `/data` LittleFS flash storage.
-- Function calls executed with arguments passed from the shell command line.
-- The file persisted across software reboots and board power cycles without touching firmware flash.
+- WAMR loaded and parsed the 180 byte `.wasm` module directly from `/data` LittleFS flash storage.
+- Function calls executed with arguments passed from the shell command line, returning typed results (`0x2a:i32` for 42 and `0x37:i32` for 55).
+- WebAssembly modules must constrain their linear memory with `-Wl,-z,stack-size=4096 -Wl,--initial-memory=65536 -Wl,--max-memory=131072`. The `wasm-ld` default requests 16 pages (1 MB), which exceeds the RP2350 SRAM and fails with `allocate linear memory failed`.
+- The file was transferred over Zmodem without reflashing and survived reboots on the LittleFS volume.

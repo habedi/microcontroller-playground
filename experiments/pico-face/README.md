@@ -82,6 +82,13 @@ make -C experiments/pico-face/test test
 The address and undefined behaviour sanitizers are on by default to catch
 out of bounds writes in drawing code.
 
+Python tests also cover the preview's PPM reader and the hook's spool writes.
+Truncated headers previously hung the reader, and unsupported sample sizes
+or short pixel data could produce invalid PNGs. The reader now rejects those
+inputs. Overlapping hooks previously shared a temporary filename, which could
+lose an update. Each spool writer now uses its own temporary file. These fixes
+were checked on the host; they have not been verified on the board.
+
 ### Partial Redraw
 
 Every preset still redraws the whole surface, because the drawing is cheap:

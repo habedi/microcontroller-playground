@@ -27,5 +27,5 @@
     i32.const 10
     call $fib
   )
-  (memory (export "memory") 1)
+  (memory (export "memory") 1 2)
 )

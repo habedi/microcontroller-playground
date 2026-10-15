@@ -1,6 +1,7 @@
 # Host tests for board-agnostic state machine, renderers, and input.
 
 CC      ?= cc
+PYTHON  ?= python3
 CFLAGS  ?= -O1 -g -std=c11 -Wall -Wextra -Werror -I../src
 LDFLAGS ?=
 
@@ -20,6 +21,7 @@ test: $(BUILD)/test_face $(BUILD)/test_render $(BUILD)/test_sprite \
 	$(BUILD)/test_sprite
 	$(BUILD)/test_input
 	$(BUILD)/test_dirty
+	$(PYTHON) -m unittest discover -s . -p test_host_tools.py
 
 $(BUILD)/test_face: test_face.c $(SRC)/face.c $(SRC)/face.h | $(BUILD)
 	$(CC) $(CFLAGS) $(SANFLAGS) -o $@ test_face.c $(SRC)/face.c $(LDFLAGS)

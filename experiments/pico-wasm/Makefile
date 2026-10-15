@@ -8,6 +8,7 @@ all: $(WASM_BIN) ## Build the WebAssembly binary
 $(WASM_BIN): main.c
 	zig cc -target wasm32-freestanding -Wl,--no-entry \
 		-Wl,--export=main -Wl,--export=fib -Wl,--export=add \
+		-Wl,-z,stack-size=4096 -Wl,--initial-memory=65536 -Wl,--max-memory=131072 \
 		-Os $< -o $@
 	@echo "Built $@ ($$(stat -c%s $@) bytes)"
 

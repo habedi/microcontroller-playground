@@ -101,12 +101,23 @@ def word_for(event: dict, event_name: str | None = None) -> str | None:
 
 
 def spool(word: str) -> None:
-    tmp = SPOOL + ".new"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        handle.write(word)
+    import tempfile
 
-    # Replace atomically, so the pusher never reads a half-written word.
-    os.replace(tmp, SPOOL)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=os.path.dirname(SPOOL),
+        prefix=os.path.basename(SPOOL) + ".", delete=False,
+    ) as handle:
+        tmp = handle.name
+        try:
+            handle.write(word)
+            handle.close()
+            # Each writer needs its own file so overlapping hooks cannot collide.
+            os.replace(tmp, SPOOL)
+        finally:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
 
 
 def _python_bin() -> str:
