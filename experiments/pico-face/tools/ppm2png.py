@@ -22,16 +22,29 @@ def read_ppm(path):
             while data[pos : pos + 1] not in (b"\n", b""):
                 pos += 1
             continue
+        if pos == len(data):
+            raise SystemExit("truncated PPM header")
         start = pos
-        while not data[pos : pos + 1].isspace():
+        while pos < len(data) and not data[pos : pos + 1].isspace():
             pos += 1
+        if pos == len(data):
+            raise SystemExit("truncated PPM header")
         fields.append(data[start:pos])
 
-    magic, width, height = fields[0], int(fields[1]), int(fields[2])
-    if magic != b"P6":
+    if fields[0] != b"P6":
         raise SystemExit("only binary PPM (P6) is supported")
+    try:
+        width, height, maximum = map(int, fields[1:])
+    except ValueError:
+        raise SystemExit("invalid PPM header") from None
+    if width <= 0 or height <= 0 or maximum != 255:
+        raise SystemExit("PPM requires positive dimensions and a maximum value of 255")
 
-    return width, height, data[pos + 1 :]
+    pixels = data[pos + 1 :]
+    size = width * height * 3
+    if len(pixels) < size:
+        raise SystemExit("truncated PPM pixels")
+    return width, height, pixels[:size]
 
 
 def write_png(path, width, height, rgb):

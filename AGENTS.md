@@ -4,7 +4,8 @@ This file guides coding agents working on this repository.
 
 ## Mission
 
-This repository is a personal playground for learning microcontroller programming across Apache NuttX and other RTOSes. It holds experiments, configurations, and notes.
+This repository is a personal playground for learning microcontroller programming across Apache NuttX and other RTOSes. It holds experiments,
+configurations, and notes.
 Priorities, in order:
 
 1. Working experiments: code that builds, flashes, and runs on hardware.
@@ -15,8 +16,11 @@ Priorities, in order:
 
 The boards connect over USB to a Linux development machine (amd64 or arm64):
 
-- Waveshare ESP32-P4-WIFI6: ESP32-P4NRW32 (dual-core RISC-V, 32 MB PSRAM, 32 MB flash) with an onboard ESP32-C6 over SDIO (link non-functional; see `docs/esp32p4.md`). Silicon revision v1.3 requires `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100`. USB-C links to a WCH CH343 UART0 bridge (`/dev/ttyACM0`, vendor `1a86`). NuttX board target is `esp32p4-function-ev-board`.
-- Raspberry Pi Pico 2 WH: RP2350 (Arm Cortex-M33 and RISC-V Hazard3 cores) with CYW43439 wireless. NuttX targets Cortex-M33 using board `raspberrypi-pico-2`. The `usbnsh` configuration provides console over USB. See `docs/raspberrypi-pico-2.md`.
+- Waveshare ESP32-P4-WIFI6: ESP32-P4NRW32 (dual-core RISC-V, 32 MB PSRAM, 32 MB flash) with an onboard ESP32-C6 over SDIO (link non-functional; see
+  `docs/esp32p4.md`). Silicon revision v1.3 requires `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100`. USB-C links to a WCH CH343
+  UART0 bridge (`/dev/ttyACM0`, vendor `1a86`). NuttX board target is `esp32p4-function-ev-board`.
+- Raspberry Pi Pico 2 WH: RP2350 (Arm Cortex-M33 and RISC-V Hazard3 cores) with CYW43439 wireless. NuttX targets Cortex-M33 using board
+  `raspberrypi-pico-2`. The `usbnsh` configuration provides console over USB. See `docs/raspberrypi-pico-2.md`.
 - 40-pin male-to-female Dupont jumper wires, 30 cm, for peripheral wiring.
 
 ## Core Rules
@@ -25,7 +29,8 @@ The boards connect over USB to a Linux development machine (amd64 or arm64):
 - Prefer small, focused changes over large refactoring.
 - Add comments only when they explain something the code does not show.
 - Do not add features, error handling, or abstractions beyond current experiment needs.
-- Never commit changes inside submodules under `external/`. Out-of-tree patches belong in `patches/`. Submodule version bumps belong in their own commit.
+- Never commit changes inside submodules under `external/`. Out-of-tree patches belong in `patches/`. Submodule version bumps belong in their own
+  commit.
 - Check the nested Espressif HAL repository at `external/nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty` directly to verify it is clean.
 - Do not flash a board or open its serial port without being asked.
 
@@ -39,9 +44,11 @@ External code lives in git submodules under `external/` (fetch with `make submod
 - `external/esp-idf`: Espressif IoT Development Framework (v5.5.5; `make espidf-install` places toolchains in `build/espressif`).
 - `external/crosstool-ng`: Espressif crosstool-NG fallback toolchain.
 
-Submodules use `ignore = dirty` in `.gitmodules`. In JetBrains IDEs, map only the repository root under Settings, Version Control, Directory Mappings to avoid accidental submodule commits.
+Submodules use `ignore = dirty` in `.gitmodules`. In JetBrains IDEs, map only the repository root under Settings, Version Control, Directory Mappings
+to avoid accidental submodule commits.
 
-ESP-IDF managed components land in `managed_components/` (gitignored; pinned by `dependencies.lock`). Document component rationale in `idf_component.yml`.
+ESP-IDF managed components land in `managed_components/` (gitignored; pinned by `dependencies.lock`). Document component rationale in
+`idf_component.yml`.
 
 Python tools are managed by uv via `pyproject.toml` (run with `uv run`). System compilers and tools come from `flake.nix` (`nix develop`).
 
@@ -58,15 +65,18 @@ Python tools are managed by uv via `pyproject.toml` (run with `uv run`). System 
 
 Builds run inside the Nix dev shell (`make shell`):
 
-1. Configure via `make nuttx-configure BOARD=<board>:<config>`. Defaults: `esp32p4-function-ev-board:nsh` (ESP32-P4) and `raspberrypi-pico-2:nsh` (Pico 2).
+1. Configure via `make nuttx-configure BOARD=<board>:<config>`. Defaults: `esp32p4-function-ev-board:nsh` (ESP32-P4) and `raspberrypi-pico-2:nsh`
+   (Pico 2).
 2. Clean rebuilds (`make nuttx-distclean`) are required after configuration or flag changes, as NuttX does not reliably rebuild vendored HAL objects.
 3. Build with `make nuttx-build`.
 
 Flashing:
+
 - Espressif boards: flash over USB serial with `make nuttx-flash-esp PORT=<port>` or `uv run esptool`.
 - Pico 2: flash in BOOTSEL mode via `make flash-pico-uf2` (copies UF2 to mass storage) or `make flash-pico` (picotool; requires `make setup-udev`).
 
 Serial console:
+
 - Open with `picocom -b 115200 /dev/ttyACM0` (requires `dialout` group).
 - Prefer the `tools/board-mcp.py` MCP server, which serializes access, handles contention, and scrubs hardware identifiers. See `docs/board-mcp.md`.
 
@@ -75,7 +85,8 @@ Serial console:
 - Pico 2: builds with `arm-none-eabi-gcc` from the dev shell.
 - ESP32-P4 and ESP32-C6: build with custom `riscv32-none-elf-gcc` (GCC 14, `rv32imac`, `ilp32`) provided by `flake.nix`.
 - Prefix: `make nuttx-*` passes `CROSSDEV=riscv32-none-elf-` automatically for RISC-V builds.
-- Rust: provided by `rust-overlay` with targets `thumbv8m.main-none-eabihf`, `riscv32imac-unknown-none-elf`, and `riscv32imafc-unknown-none-elf` pre-installed. Flash with `probe-rs` (Pico 2) or `espflash` (ESP32).
+- Rust: provided by `rust-overlay` with targets `thumbv8m.main-none-eabihf`, `riscv32imac-unknown-none-elf`, and `riscv32imafc-unknown-none-elf`
+  pre-installed. Flash with `probe-rs` (Pico 2) or `espflash` (ESP32).
 - Zig: pinned to 0.17.0 via `zig-overlay`. Cross compiles to all three chips and serves as a C cross compiler.
 
 ## Adding a Board or an OS
@@ -84,7 +95,7 @@ Serial console:
 - New OS or SDK: add submodule under `external/`, prefixed Makefile targets (`<os>-*`), subdirectory in `configs/`, and packages in `flake.nix`.
 - OS environment variables belong in `flake.nix` `shellHook`.
 - Experiments name boards and OS in `README.md`, not directory names.
-- Migration away from an OS removes its submodule, target group, configs, and packages without residue.
+- Migration away from an OS removes its submodule, target group, configs, and packages without a residue.
 
 ## Writing Style
 
@@ -105,11 +116,13 @@ Serial console:
 3. Flash, verify behavior on hardware, and document findings in `docs/`.
 4. Save reproducible configurations under `configs/`.
 
-Hardware behavior is verified on physical boards. Logic independent of hardware (parsers, protocol framing) must have host-side unit tests under `experiments/<name>/test/`.
+Hardware behavior is verified on physical boards. Logic independent of hardware (parsers, protocol framing) must have host-side unit tests under
+`experiments/<name>/test/`.
 
 ## Validation
 
 Before committing:
+
 1. Affected configurations build cleanly after `make nuttx-distclean`.
 2. Image flashed and verified on physical hardware, documented in notes.
 3. Submodules under `external/` (including nested HALs) are clean, and no build output is staged.
@@ -117,6 +130,7 @@ Before committing:
 ## Privacy
 
 This repository is public. Never commit:
+
 - Absolute paths: use `PLAYGROUND_ROOT` (check saved defconfigs).
 - Hardware identifiers: no MAC addresses, eFuse contents, or serial numbers.
 - Wireless survey data: record scan success and count, never SSIDs or BSSIDs.
