@@ -79,6 +79,8 @@ Two ways to flash once the board is in BOOTSEL:
   and `CONFIG_ETC_ROMFS` so `/data` and `/tmp` are mounted before the shell starts. It gives the littlefs
   region the rest of the flash, 3 MB rather than 1 MB. `CONFIG_ARCH_LEDS` has to stay off, because the
   CYW43439 patch compiles out the LED sources that `board_autoled_on` lives in.
+- `configs/nuttx/raspberrypi-pico-2/usbnsh-wamr/defconfig` is `usbnsh-littlefs` plus WAMR (`iwasm`), Zmodem
+  file transfer (`rz`), `CONFIG_ELF`, and `CONFIG_ETC_ROMFS` so the 3 MB `/data` volume is mounted at boot.
 
 Rebuild any of them with:
 
@@ -356,6 +358,92 @@ misbehaves later, that missing press is the first thing to re-check.
 `kill` does not stop a task in these configurations. `CONFIG_SIG_DEFAULT` is off, so there is no default action
 for `SIGKILL` and the target ignores it, `kill -9` included. A long running application needs its own way out.
 The face reads the word `quit` from its state file for exactly this reason.
+
+### WebAssembly (WAMR)
+
+The `usbnsh-wamr` configuration enables the WebAssembly Micro Runtime (WAMR) through `CONFIG_INTERPRETERS_WAMR`,
+`CONFIG_INTERPRETERS_IWASM_TASK`, `CONFIG_INTERPRETERS_WAMR_CLASSIC`, and `CONFIG_INTERPRETERS_WAMR_LIBC_BUILTIN`.
+
+The image builds at 295860 bytes of flash (about 7.1 percent of the 4 MB chip) and 18900 bytes of static RAM
+(about 3.6 percent of the 512 KB main SRAM), leaving more than 490 KB of heap.
+
+Running a WebAssembly binary from the `/data` LittleFS storage:
+
+```
+nsh> iwasm /data/hello.wasm
+```
+
+Pass runtime parameters when needed:
+
+```
+nsh> iwasm --stack-size=16384 --heap-size=32768 /data/app.wasm
+```
+
+#### Transferring files to `/data`
+
+The `usbnsh-wamr` configuration includes Zmodem via `CONFIG_SYSTEM_ZMODEM` with `CONFIG_SYSTEM_ZMODEM_MOUNTPOINT`
+set to `/data`. This allows transferring `.wasm` files over the USB serial console without reflashing:
+
+1. In the NuttShell console, start the receiver:
+   ```
+   nsh> rz
+   ```
+2. On the host development machine, send the file using `sz` from `picocom` (via `Ctrl-A` then `Ctrl-S`), or
+   from the command line:
+   ```shell
+   sz -b -vv app.wasm > /dev/ttyACM0 < /dev/ttyACM0
+   ```
+3. The received file lands in `/data/app.wasm`, preserved across software resets and reflashing.
+
+#### RAM requirements on RP2350
+
+The RP2350 carries 520 KB of SRAM (512 KB in the main banks plus two 4 KB scratch banks) and no external PSRAM.
+With the base system consuming less than 20 KB of RAM, more than 490 KB of heap is available.
+
+Running a WebAssembly module consumes RAM across four areas:
+
+- WAMR task stack: `CONFIG_INTERPRETERS_WAMR_STACKSIZE` defaults to 8192 bytes.
+- Binary file buffer: `bh_read_file_to_buffer()` loads the entire `.wasm` binary into heap during execution.
+  A 20 KB binary consumes 20 KB of heap.
+- WebAssembly operand stack: `iwasm` defaults to 64 KB (`--stack-size`), but modules that avoid deep recursion
+  run comfortably with 8 KB or 16 KB.
+- Linear memory: WebAssembly allocates memory in 64 KB pages. A module declaring `(memory 1)` allocates 64 KB,
+  while `(memory 4)` allocates 256 KB.
+
+A typical embedded module using one memory page and a 16 KB execution stack uses approximately 100 KB to 120 KB
+of RAM in total, leaving more than 350 KB of free heap on the RP2350. Modules requiring more than 6 pages (384 KB)
+will exhaust available heap.
+
+### Loadable Native Applications (ELF)
+
+The RP2350 configuration supports `CONFIG_BINFMT_LOADABLE` and `CONFIG_ELF`.
+
+#### Board and architecture support
+
+The RP2350 uses an Arm Cortex-M33 core (`CONFIG_ARCH_ARMV8M=y`). NuttX provides full ARMv8-M Thumb-2 relocation
+support in `libs/libc/machine/arm/armv8-m/arch_elf.c` (`up_checkarch()`, `up_relocate()`, and `up_relocateadd()`).
+SRAM on the RP2350 (0x20000000 to 0x20082000) is executable. The binary loader reads an ELF file from `/data`,
+allocates SRAM from the system heap for text and data sections, resolves relocations, invalidates the instruction
+cache, and branches to the module entry point.
+
+#### Application build environment
+
+Loadable applications are built as relocatable ELFs (partial linking with `-r`):
+
+1. Compiler flags:
+   ```
+   arm-none-eabi-gcc -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard \
+     -mlong-calls -fno-common -c app.c -o app.o
+   ```
+2. Linker flags:
+   ```
+   arm-none-eabi-ld -r -e main -T <nuttx-export>/scripts/gnu-elf.ld app.o -o app.elf
+   ```
+3. Export package: `make export` packages the NuttX libraries, header files, and `gnu-elf.ld` linker script into
+   `nuttx-export-*.zip`. Applications built outside the tree compile and link against this export directory.
+4. Symbol resolution: In flat builds, undefined references to system functions (`printf`, `malloc`, and POSIX
+   APIs) require an exported symbol table. NuttX provides symbol tables via `tools/mksymtab.c` registered with
+   `boardctl(BOARDIOC_APP_SYMTAB)` or `CONFIG_EXECFUNCS_SYMTAB_ARRAY`.
 
 ### Not Done Yet
 
