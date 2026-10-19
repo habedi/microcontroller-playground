@@ -8,7 +8,7 @@
 
 ---
 
-This is a playground for microcontroller projects and experiments.
+This is a playground for my microcontroller projects and experiments.
 
 ---
 
