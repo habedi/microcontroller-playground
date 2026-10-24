@@ -14,6 +14,8 @@ on:
     branches:
       - main
       - develop
+    tags:
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
