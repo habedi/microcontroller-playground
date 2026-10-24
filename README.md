@@ -3,10 +3,8 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/habedi/microcontroller-playground/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github&logoColor=white)](https://github.com/habedi/microcontroller-playground/actions/workflows/tests.yml)
 [![Documentation](https://img.shields.io/badge/docs-latest-007ec6?style=flat&labelColor=282c34&logo=read-the-docs&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/docs)
 [![License](https://img.shields.io/badge/license-Apache--2.0-007ec6?style=flat&labelColor=282c34&logo=open-source-initiative&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/LICENSE)
-[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-Pico%202-507ec6?style=flat&labelColor=282c34&logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/products/raspberry-pi-pico-2/)
-[![ESP32](https://img.shields.io/badge/Espressif-ESP32-507ec6?style=flat&labelColor=282c34&logo=espressif&logoColor=white)](https://www.espressif.com/)
-[![Apache NuttX](https://img.shields.io/badge/Apache-NuttX-507ec6?style=flat&labelColor=282c34&logo=apache&logoColor=white)](https://nuttx.apache.org/)
-[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-FreeRTOS-507ec6?style=flat&labelColor=282c34&logo=freertos&logoColor=white)](https://docs.espressif.com/projects/esp-idf/en/latest/)
+[![MCU](https://img.shields.io/badge/MCU-Pico%202%20W%20%7C%20ESP32--P4-507ec6?style=flat&labelColor=282c34&logo=microchip&logoColor=white)](docs/)
+[![RTOS](https://img.shields.io/badge/RTOS-NuttX%20%7C%20FreeRTOS-507ec6?style=flat&labelColor=282c34&logo=apache&logoColor=white)](https://nuttx.apache.org/)
 
 ---
 

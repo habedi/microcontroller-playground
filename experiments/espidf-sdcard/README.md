@@ -1,11 +1,11 @@
 ## ESP-IDF SD Card Test
 
-ESP-IDF experiment testing the onboard MicroSD / TF card slot on the Waveshare ESP32-P4-WIFI6.
+ESP-IDF experiment testing the onboard MicroSD / TF card slot on the Waveshare ESP32-P4-WIFI6, featuring an interactive NSH-compatible command shell.
 
 - Board: Waveshare ESP32-P4-WIFI6, chip revision v1.3
 - OS: FreeRTOS, through ESP-IDF v5.5.5
 - Hardware link: 4-bit SDMMC host interface (Slot 0), on-chip LDO channel 4 for IO pads, and active-low power switch on GPIO 45
-- Result: passes. Probes card name, 122 GB capacity, mounts FAT filesystem at `/sdcard`, writes and reads a test file cleanly.
+- Result: passes. Probes 128 GB card (121.9 GB usable FAT32 volume), mounts at `/sdcard`, provides an interactive REPL shell with `nsh> ` prompt.
 
 ### Hardware Configuration
 
@@ -20,6 +20,21 @@ The TF card slot on the Waveshare board links to the ESP32-P4 SDMMC controller p
 - Power switch: GPIO 45 (drives an onboard P-channel MOSFET switch; driving low supplies 3.3 V to the slot)
 - IO power domain: on-chip LDO channel 4 powers the ESP32-P4 SDMMC pad domain (`sd_pwr_ctrl_new_on_chip_ldo`)
 
+### Interactive Commands
+
+The firmware runs `esp_console` on UART0 with prompt `nsh> `:
+
+- `help`: list available commands
+- `ls [<path>]`: directory listing (defaults to `/sdcard`)
+- `cat <filename>`: display file contents
+- `write <filename> <text>`: write text to a file
+- `df`: display storage capacity and free space on `/sdcard`
+- `free`: display heap memory statistics
+- `uname`: display operating system and chip revision
+- `mkdir <dirname>`: create directory
+- `rm <filename>`: delete a file
+- `reboot`: restart the board
+
 ### Build and Flash
 
 ```shell
@@ -27,21 +42,4 @@ make espidf-build ESPIDF_SRC=experiments/espidf-sdcard
 make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard
 ```
 
-### Verified Hardware Output
-
-```text
-I (307) espidf_sdcard: Starting ESP32-P4 SDMMC storage test
-I (307) espidf_sdcard: Enabling slot power switch on GPIO 45 (active low)
-I (607) espidf_sdcard: Mounting filesystem at /sdcard
-I (657) espidf_sdcard: Card initialized and filesystem mounted successfully
-Name: SR128
-Type: SDHC
-Speed: 20.00 MHz (limit: 20.00 MHz)
-Size: 121942MB
-CSD: ver=2, sector_size=512, capacity=249737216 read_bl_len=9
-SSR: bus_width=4
-I (677) espidf_sdcard: Testing file write: /sdcard/p4_test.txt
-I (687) espidf_sdcard: Testing file read: /sdcard/p4_test.txt
-I (687) espidf_sdcard: Read back content: ESP32-P4 SDMMC test successful
-I (687) espidf_sdcard: Card read/write test passed
-```
+Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
