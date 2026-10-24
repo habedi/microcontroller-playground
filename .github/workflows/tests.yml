@@ -129,7 +129,9 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build ESP-IDF firmware
+        shell: bash
         run: |
+          . /opt/esp/idf/export.sh
           idf.py -C ${{ matrix.dir }} -B build/${{ matrix.name }} set-target ${{ matrix.target }} build
 
       - name: Upload firmware artifacts
