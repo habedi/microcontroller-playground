@@ -1,13 +1,15 @@
 /* SDMMC MicroSD storage test on Waveshare ESP32-P4-WIFI6.
  *
- * The MicroSD slot is connected to the ESP32-P4 SDMMC host:
- *   CLK:  GPIO 43
- *   CMD:  GPIO 44
- *   D0:   GPIO 39
- *   D1:   GPIO 40
- *   D2:   GPIO 41
- *   D3:   GPIO 42
- *   PWR:  GPIO 45 (active low P-channel MOSFET switch)
+ * Hardware configuration:
+ *   - On-chip LDO channel 4 supplies power to the ESP32-P4 SDMMC IO pad domain.
+ *   - GPIO 45 drives the onboard MicroSD socket power switch (active low).
+ *   - Host slot 0 is the native SDMMC controller for:
+ *       CLK:  GPIO 43
+ *       CMD:  GPIO 44
+ *       D0:   GPIO 39
+ *       D1:   GPIO 40
+ *       D2:   GPIO 41
+ *       D3:   GPIO 42
  */
 
 #include <stdio.h>
@@ -23,6 +25,7 @@
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
 
 #define PIN_TF_PWR GPIO_NUM_45
@@ -39,7 +42,7 @@ static const char *TAG = "espidf_sdcard";
 
 static void power_on_slot(void)
 {
-  ESP_LOGI(TAG, "Enabling slot power on GPIO %d (active low)", PIN_TF_PWR);
+  ESP_LOGI(TAG, "Enabling slot power switch on GPIO %d (active low)", PIN_TF_PWR);
 
   gpio_config_t io_conf = {
       .pin_bit_mask = 1ULL << PIN_TF_PWR,
@@ -52,7 +55,7 @@ static void power_on_slot(void)
   gpio_set_level(PIN_TF_PWR, 0);
 
   /* Allow power rail to stabilize */
-  vTaskDelay(pdMS_TO_TICKS(150));
+  vTaskDelay(pdMS_TO_TICKS(300));
 }
 
 static esp_err_t test_file_io(const char *path)
@@ -77,7 +80,7 @@ static esp_err_t test_file_io(const char *path)
       return ESP_FAIL;
     }
 
-  char buf[64];
+  char buf[64] = {0};
   if (fgets(buf, sizeof(buf), f) == NULL)
     {
       ESP_LOGE(TAG, "Failed to read data from file");
@@ -102,8 +105,22 @@ void app_main(void)
       .allocation_unit_size = 16 * 1024,
   };
 
+  /* Initialize the on-chip LDO (channel 4) for ESP32-P4 SDMMC IO pad domain */
+  sd_pwr_ctrl_ldo_config_t ldo_config = {
+      .ldo_chan_id = 4,
+  };
+  sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+  esp_err_t ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
+  if (ret != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to create on-chip LDO driver: %s", esp_err_to_name(ret));
+      return;
+    }
+
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.slot = SDMMC_HOST_SLOT_0;
   host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+  host.pwr_ctrl_handle = pwr_ctrl_handle;
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.clk = PIN_TF_CLK;
@@ -112,6 +129,10 @@ void app_main(void)
   slot_config.d1 = PIN_TF_D1;
   slot_config.d2 = PIN_TF_D2;
   slot_config.d3 = PIN_TF_D3;
+  slot_config.d4 = GPIO_NUM_NC;
+  slot_config.d5 = GPIO_NUM_NC;
+  slot_config.d6 = GPIO_NUM_NC;
+  slot_config.d7 = GPIO_NUM_NC;
   slot_config.cd = GPIO_NUM_NC;
   slot_config.wp = GPIO_NUM_NC;
   slot_config.width = 4;
@@ -120,9 +141,8 @@ void app_main(void)
   sdmmc_card_t *card = NULL;
   ESP_LOGI(TAG, "Mounting filesystem at %s", MOUNT_POINT);
 
-  esp_err_t ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config,
-                                         &mount_config, &card);
-
+  ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config,
+                               &mount_config, &card);
   if (ret == ESP_OK)
     {
       ESP_LOGI(TAG, "Card initialized and filesystem mounted successfully");
@@ -137,11 +157,6 @@ void app_main(void)
   else
     {
       ESP_LOGE(TAG, "Failed to mount SD card (%s)", esp_err_to_name(ret));
-      if (ret == ESP_FAIL)
-        {
-          ESP_LOGW(TAG, "Mount failure indicates partition table or FAT format issue.");
-          ESP_LOGW(TAG, "Cards formatted with exFAT must be formatted to FAT32.");
-        }
     }
 
   for (uint32_t i = 0;; i++)
