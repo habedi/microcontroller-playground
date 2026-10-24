@@ -1,0 +1,7 @@
+dependencies:
+  # Wi-Fi remote proxy over SDIO to onboard C6
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "^3.0.6"
+
+  # LittleFS filesystem on internal flash
+  joltwallet/littlefs: "^1.14.0"

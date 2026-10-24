@@ -1,15 +1,11 @@
-/* SDMMC MicroSD storage with interactive NSH-compatible console on ESP32-P4.
+/* SDMMC MicroSD, LittleFS, Wi-Fi client, and terminal editor on ESP32-P4.
  *
  * Hardware configuration:
  *   - On-chip LDO channel 4 supplies power to the ESP32-P4 SDMMC IO pad domain.
  *   - GPIO 45 drives the onboard MicroSD socket power switch (active low).
- *   - Host slot 0 is the native SDMMC controller for:
- *       CLK:  GPIO 43
- *       CMD:  GPIO 44
- *       D0:   GPIO 39
- *       D1:   GPIO 40
- *       D2:   GPIO 41
- *       D3:   GPIO 42
+ *   - Host slot 0 is the native SDMMC controller for MicroSD card (/sdcard).
+ *   - Internal NOR flash houses 12 MB LittleFS storage (/data).
+ *   - SDIO Host slot 1 connects to onboard ESP32-C6 for Wi-Fi and Bluetooth.
  *   - Interactive REPL console runs on UART0 with prompt "nsh> ".
  */
 
@@ -23,14 +19,24 @@
 
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
+#include "editor.h"
 #include "esp_chip_info.h"
 #include "esp_console.h"
 #include "esp_err.h"
+#include "esp_event.h"
+#include "esp_littlefs.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "nvs_flash.h"
+#include "ping/ping_sock.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
 
@@ -43,16 +49,19 @@
 #define PIN_TF_D3    GPIO_NUM_42
 #define PIN_C6_RESET GPIO_NUM_54
 
-#define MOUNT_POINT "/sdcard"
+#define SDCARD_MOUNT_POINT "/sdcard"
+#define LITTLEFS_MOUNT_POINT "/data"
 
-static const char *TAG = "espidf_sdcard";
+static const char *TAG = "espidf_shell";
 
-static char s_cwd[256] = MOUNT_POINT;
+static char s_cwd[256] = SDCARD_MOUNT_POINT;
+static esp_netif_t *s_sta_netif = NULL;
+static bool s_wifi_initialized = false;
+static bool s_wifi_connected = false;
+static SemaphoreHandle_t s_ip_sem = NULL;
 
 static void power_on_slot(void)
 {
-  ESP_LOGI(TAG, "Enabling slot power switch on GPIO %d (active low)", PIN_TF_PWR);
-
   gpio_config_t io_conf = {
       .pin_bit_mask = 1ULL << PIN_TF_PWR,
       .mode = GPIO_MODE_OUTPUT,
@@ -62,8 +71,6 @@ static void power_on_slot(void)
   };
   gpio_config(&io_conf);
   gpio_set_level(PIN_TF_PWR, 0);
-
-  /* Allow power rail to stabilize */
   vTaskDelay(pdMS_TO_TICKS(300));
 }
 
@@ -100,7 +107,7 @@ static void resolve_path(const char *in, char *out, size_t out_len)
     {
       if (strcmp(tok, ".") == 0)
         {
-          /* Current dir, ignore */
+          /* Current directory: skip */
         }
       else if (strcmp(tok, "..") == 0)
         {
@@ -109,7 +116,7 @@ static void resolve_path(const char *in, char *out, size_t out_len)
               count--;
             }
         }
-      else if (tok[0] != '\0')
+      else if (strlen(tok) > 0)
         {
           if (count < 16)
             {
@@ -144,154 +151,127 @@ static int cmd_pwd(int argc, char **argv)
 
 static int cmd_cd(int argc, char **argv)
 {
-  char target[256];
+  char target[512];
   if (argc < 2)
     {
-      resolve_path(MOUNT_POINT, target, sizeof(target));
+      strncpy(target, SDCARD_MOUNT_POINT, sizeof(target));
     }
   else
     {
       resolve_path(argv[1], target, sizeof(target));
     }
 
-  if (strcmp(target, "/") == 0)
+  struct stat st;
+  if (stat(target, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      strncpy(s_cwd, "/", sizeof(s_cwd) - 1);
+      strncpy(s_cwd, target, sizeof(s_cwd) - 1);
       s_cwd[sizeof(s_cwd) - 1] = '\0';
       return 0;
     }
-
-  DIR *d = opendir(target);
-  if (!d)
-    {
-      printf("cd: %s: No such directory\n", target);
-      return 1;
-    }
-  closedir(d);
-
-  strncpy(s_cwd, target, sizeof(s_cwd) - 1);
-  s_cwd[sizeof(s_cwd) - 1] = '\0';
-  return 0;
+  printf("cd: %s: No such directory\n", target);
+  return 1;
 }
 
 static int cmd_ls(int argc, char **argv)
 {
-  char path[256];
-  resolve_path(argc > 1 ? argv[1] : s_cwd, path, sizeof(path));
-
-  if (strcmp(path, "/") == 0)
+  char path[512];
+  if (argc > 1)
     {
-      printf("Directory: /\n");
-      printf("  <DIR>         sdcard\n");
-      return 0;
+      resolve_path(argv[1], path, sizeof(path));
+    }
+  else
+    {
+      strncpy(path, s_cwd, sizeof(path) - 1);
+      path[sizeof(path) - 1] = '\0';
     }
 
-  DIR *dir = opendir(path);
-  if (!dir)
+  DIR *d = opendir(path);
+  if (!d)
     {
-      printf("ls: cannot open directory '%s'\n", path);
+      printf("ls: cannot open directory %s\n", path);
       return 1;
     }
 
   printf("Directory: %s\n", path);
-  struct dirent *de;
-  while ((de = readdir(dir)) != NULL)
+  struct dirent *entry;
+  char full_path[1024];
+  struct stat st;
+  while ((entry = readdir(d)) != NULL)
     {
-      char full_path[512];
-      snprintf(full_path, sizeof(full_path), "%s/%s", path, de->d_name);
-      struct stat st;
-      if (stat(full_path, &st) == 0)
-        {
-          if (S_ISDIR(st.st_mode))
-            {
-              printf("  <DIR>         %s\n", de->d_name);
-            }
-          else
-            {
-              printf("  %10lu B  %s\n", (unsigned long)st.st_size, de->d_name);
-            }
-        }
-      else
-        {
-          printf("  %s\n", de->d_name);
-        }
-    }
-  closedir(dir);
-  return 0;
-}
-
-static void tree_traverse(const char *dir_path, int depth, int *dir_count, int *file_count)
-{
-  if (depth > 6)
-    {
-      return;
-    }
-
-  DIR *dir = opendir(dir_path);
-  if (!dir)
-    {
-      return;
-    }
-
-  struct dirent *de;
-  while ((de = readdir(dir)) != NULL)
-    {
-      if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
         {
           continue;
         }
 
-      char sub_path[512];
-      snprintf(sub_path, sizeof(sub_path), "%s/%s", dir_path, de->d_name);
-
-      struct stat st;
-      bool is_dir = false;
-      if (stat(sub_path, &st) == 0 && S_ISDIR(st.st_mode))
+      snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+      if (stat(full_path, &st) == 0)
         {
-          is_dir = true;
-        }
-
-      for (int i = 0; i < depth; i++)
-        {
-          printf("  ");
-        }
-
-      if (is_dir)
-        {
-          printf("+-- %s/\n", de->d_name);
-          (*dir_count)++;
-          tree_traverse(sub_path, depth + 1, dir_count, file_count);
+          if (S_ISDIR(st.st_mode))
+            {
+              printf("  <DIR>         %s\n", entry->d_name);
+            }
+          else
+            {
+              printf("  %10ld B  %s\n", (long)st.st_size, entry->d_name);
+            }
         }
       else
         {
-          printf("|-- %s (%lu B)\n", de->d_name, (unsigned long)st.st_size);
-          (*file_count)++;
+          printf("                %s\n", entry->d_name);
         }
     }
-  closedir(dir);
+  closedir(d);
+  return 0;
+}
+
+static void tree_traverse(const char *base_path, int depth)
+{
+  if (depth > 5) return;
+  DIR *d = opendir(base_path);
+  if (!d) return;
+
+  struct dirent *entry;
+  char sub_path[1024];
+  struct stat st;
+  while ((entry = readdir(d)) != NULL)
+    {
+      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+        {
+          continue;
+        }
+      for (int i = 0; i < depth; i++)
+        {
+          printf("│   ");
+        }
+      snprintf(sub_path, sizeof(sub_path), "%s/%s", base_path, entry->d_name);
+      if (stat(sub_path, &st) == 0 && S_ISDIR(st.st_mode))
+        {
+          printf("├── %s/\n", entry->d_name);
+          tree_traverse(sub_path, depth + 1);
+        }
+      else
+        {
+          printf("├── %s\n", entry->d_name);
+        }
+    }
+  closedir(d);
 }
 
 static int cmd_tree(int argc, char **argv)
 {
-  char target[256];
-  resolve_path(argc > 1 ? argv[1] : s_cwd, target, sizeof(target));
-
-  if (strcmp(target, "/") == 0)
+  char path[512];
+  if (argc > 1)
     {
-      printf("/\n");
-      printf("+-- sdcard/\n");
-      int dir_count = 1;
-      int file_count = 0;
-      tree_traverse(MOUNT_POINT, 1, &dir_count, &file_count);
-      printf("\n%d directories, %d files\n", dir_count, file_count);
-      return 0;
+      resolve_path(argv[1], path, sizeof(path));
+    }
+  else
+    {
+      strncpy(path, s_cwd, sizeof(path) - 1);
+      path[sizeof(path) - 1] = '\0';
     }
 
-  printf("%s\n", target);
-  int dir_count = 0;
-  int file_count = 0;
-  tree_traverse(target, 0, &dir_count, &file_count);
-  printf("\n%d directories, %d files\n", dir_count, file_count);
+  printf("%s\n", path);
+  tree_traverse(path, 0);
   return 0;
 }
 
@@ -303,25 +283,24 @@ static int cmd_cat(int argc, char **argv)
       return 1;
     }
 
-  char full_path[256];
+  char full_path[512];
   resolve_path(argv[1], full_path, sizeof(full_path));
 
   FILE *f = fopen(full_path, "r");
   if (!f)
     {
-      printf("cat: failed to open '%s'\n", full_path);
+      printf("cat: %s: No such file\n", full_path);
       return 1;
     }
 
-  char buf[128];
-  size_t bytes;
-  while ((bytes = fread(buf, 1, sizeof(buf) - 1, f)) > 0)
+  char buf[256];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
     {
-      buf[bytes] = '\0';
-      fputs(buf, stdout);
+      fwrite(buf, 1, n, stdout);
     }
-  fclose(f);
   printf("\n");
+  fclose(f);
   return 0;
 }
 
@@ -333,23 +312,20 @@ static int cmd_write(int argc, char **argv)
       return 1;
     }
 
-  char full_path[256];
+  char full_path[512];
   resolve_path(argv[1], full_path, sizeof(full_path));
 
   FILE *f = fopen(full_path, "w");
   if (!f)
     {
-      printf("write: failed to open '%s'\n", full_path);
+      printf("write: cannot open %s for writing\n", full_path);
       return 1;
     }
 
   for (int i = 2; i < argc; i++)
     {
       fputs(argv[i], f);
-      if (i + 1 < argc)
-        {
-          fputc(' ', f);
-        }
+      if (i < argc - 1) fputc(' ', f);
     }
   fputc('\n', f);
   fclose(f);
@@ -365,50 +341,48 @@ static int cmd_cp(int argc, char **argv)
       return 1;
     }
 
-  char src[256];
-  char dst[256];
+  char src[512];
+  char dst[512];
   resolve_path(argv[1], src, sizeof(src));
   resolve_path(argv[2], dst, sizeof(dst));
 
-  /* If dst is an existing directory, append src filename */
-  DIR *d = opendir(dst);
-  if (d)
+  struct stat st;
+  if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      closedir(d);
-      const char *slash = strrchr(src, '/');
+      char *slash = strrchr(src, '/');
       const char *basename = slash ? slash + 1 : src;
-      char new_dst[512];
-      snprintf(new_dst, sizeof(new_dst), "%s/%s", dst, basename);
-      strncpy(dst, new_dst, sizeof(dst) - 1);
+      char dst_combined[1024];
+      snprintf(dst_combined, sizeof(dst_combined), "%s/%s", dst, basename);
+      strncpy(dst, dst_combined, sizeof(dst) - 1);
       dst[sizeof(dst) - 1] = '\0';
     }
 
-  FILE *fsrc = fopen(src, "rb");
-  if (!fsrc)
+  FILE *in = fopen(src, "rb");
+  if (!in)
     {
-      printf("cp: cannot open source '%s'\n", src);
+      printf("cp: cannot open source file %s\n", src);
       return 1;
     }
 
-  FILE *fdst = fopen(dst, "wb");
-  if (!fdst)
+  FILE *out = fopen(dst, "wb");
+  if (!out)
     {
-      printf("cp: cannot create destination '%s'\n", dst);
-      fclose(fsrc);
+      printf("cp: cannot open destination file %s\n", dst);
+      fclose(in);
       return 1;
     }
 
   char buf[512];
   size_t n;
   size_t total = 0;
-  while ((n = fread(buf, 1, sizeof(buf), fsrc)) > 0)
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
     {
-      fwrite(buf, 1, n, fdst);
+      fwrite(buf, 1, n, out);
       total += n;
     }
-  fclose(fsrc);
-  fclose(fdst);
-  printf("Copied %lu bytes to %s\n", (unsigned long)total, dst);
+  fclose(in);
+  fclose(out);
+  printf("Copied %zu bytes from %s to %s\n", total, src, dst);
   return 0;
 }
 
@@ -420,7 +394,7 @@ static int cmd_rm(int argc, char **argv)
       return 1;
     }
 
-  char full_path[256];
+  char full_path[512];
   resolve_path(argv[1], full_path, sizeof(full_path));
 
   if (unlink(full_path) == 0)
@@ -428,7 +402,7 @@ static int cmd_rm(int argc, char **argv)
       printf("Removed %s\n", full_path);
       return 0;
     }
-  printf("rm: failed to remove %s\n", full_path);
+  printf("rm: cannot remove %s\n", full_path);
   return 1;
 }
 
@@ -440,10 +414,10 @@ static int cmd_mkdir(int argc, char **argv)
       return 1;
     }
 
-  char full_path[256];
+  char full_path[512];
   resolve_path(argv[1], full_path, sizeof(full_path));
 
-  if (mkdir(full_path, 0777) == 0)
+  if (mkdir(full_path, 0755) == 0)
     {
       printf("Created directory %s\n", full_path);
       return 0;
@@ -454,24 +428,32 @@ static int cmd_mkdir(int argc, char **argv)
 
 static int cmd_df(int argc, char **argv)
 {
-  uint64_t total_bytes = 0;
-  uint64_t free_bytes = 0;
-  esp_err_t err = esp_vfs_fat_info(MOUNT_POINT, &total_bytes, &free_bytes);
-  if (err != ESP_OK)
+  printf("Filesystem      Size        Used       Available  Mounted on\n");
+
+  /* FATFS on SD Card */
+  uint64_t total_sd = 0, free_sd = 0;
+  if (esp_vfs_fat_info(SDCARD_MOUNT_POINT, &total_sd, &free_sd) == ESP_OK)
     {
-      printf("df: failed to get filesystem statistics for %s (%s)\n",
-             MOUNT_POINT, esp_err_to_name(err));
-      return 1;
+      uint64_t used_sd = total_sd - free_sd;
+      printf("fatfs (SD)      %-10lu MB %-10lu MB %-10lu MB %s\n",
+             (unsigned long)(total_sd / (1024 * 1024)),
+             (unsigned long)(used_sd / (1024 * 1024)),
+             (unsigned long)(free_sd / (1024 * 1024)),
+             SDCARD_MOUNT_POINT);
     }
 
-  uint64_t used_bytes = total_bytes - free_bytes;
+  /* LittleFS on Internal Flash */
+  size_t total_lfs = 0, used_lfs = 0;
+  if (esp_littlefs_info("storage", &total_lfs, &used_lfs) == ESP_OK)
+    {
+      size_t free_lfs = total_lfs - used_lfs;
+      printf("littlefs        %-10u KB %-10u KB %-10u KB %s\n",
+             (unsigned)(total_lfs / 1024),
+             (unsigned)(used_lfs / 1024),
+             (unsigned)(free_lfs / 1024),
+             LITTLEFS_MOUNT_POINT);
+    }
 
-  printf("Filesystem      Size        Used       Available  Mounted on\n");
-  printf("fatfs (SD)      %-10lu MB %-10lu MB %-10lu MB %s\n",
-         (unsigned long)(total_bytes / (1024 * 1024)),
-         (unsigned long)(used_bytes / (1024 * 1024)),
-         (unsigned long)(free_bytes / (1024 * 1024)),
-         MOUNT_POINT);
   return 0;
 }
 
@@ -518,15 +500,15 @@ static int cmd_ps(int argc, char **argv)
         }
       else if (status_array[i].uxCoreAffinityMask == 3)
         {
-          snprintf(core_str, sizeof(core_str), "0/1");
+          snprintf(core_str, sizeof(core_str), "Any");
         }
 #endif
-      printf("%-4lu  %-16s  %-8s  %-4lu  %-8lu  %-5s\n",
-             (unsigned long)status_array[i].xTaskNumber,
+      printf("%-4u  %-16s  %-8s  %-4u  %-8u  %-5s\n",
+             (unsigned)status_array[i].xTaskNumber,
              status_array[i].pcTaskName,
              task_state_name(status_array[i].eCurrentState),
-             (unsigned long)status_array[i].uxCurrentPriority,
-             (unsigned long)status_array[i].usStackHighWaterMark,
+             (unsigned)status_array[i].uxCurrentPriority,
+             (unsigned)status_array[i].usStackHighWaterMark,
              core_str);
     }
 
@@ -543,10 +525,13 @@ static int cmd_free(int argc, char **argv)
 
 static int cmd_uname(int argc, char **argv)
 {
-  esp_chip_info_t info;
-  esp_chip_info(&info);
-  printf("ESP-IDF %s (FreeRTOS) chip rev v%u.%u, %u cores\n",
-         esp_get_idf_version(), info.revision / 100, info.revision % 100, info.cores);
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+  printf("ESP-IDF v%s (FreeRTOS) chip rev v%d.%d, %d cores\n",
+         esp_get_idf_version(),
+         chip_info.revision / 100,
+         chip_info.revision % 100,
+         chip_info.cores);
   return 0;
 }
 
@@ -568,13 +553,312 @@ static int cmd_reset_c6(int argc, char **argv)
   };
   gpio_config(&io_conf);
 
-  printf("Holding ESP32-C6 in reset (GPIO 54 = 0)...\n");
+  printf("Asserting C6 reset (GPIO %d LOW)...\n", PIN_C6_RESET);
   gpio_set_level(PIN_C6_RESET, 0);
-  vTaskDelay(pdMS_TO_TICKS(200));
-
-  printf("Releasing ESP32-C6 from reset (GPIO 54 = 1)...\n");
+  vTaskDelay(pdMS_TO_TICKS(100));
+  printf("Releasing C6 reset (GPIO %d HIGH)...\n", PIN_C6_RESET);
   gpio_set_level(PIN_C6_RESET, 1);
   return 0;
+}
+
+static int cmd_nano(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: nano <filename> (or edit <filename>)\n");
+      return 1;
+    }
+
+  char full_path[512];
+  resolve_path(argv[1], full_path, sizeof(full_path));
+  return editor_open(full_path);
+}
+
+static const char *auth_name(wifi_auth_mode_t mode)
+{
+  switch (mode)
+    {
+      case WIFI_AUTH_OPEN:            return "open";
+      case WIFI_AUTH_WEP:             return "WEP";
+      case WIFI_AUTH_WPA_PSK:         return "WPA";
+      case WIFI_AUTH_WPA2_PSK:        return "WPA2";
+      case WIFI_AUTH_WPA_WPA2_PSK:    return "WPA/WPA2";
+      case WIFI_AUTH_WPA3_PSK:        return "WPA3";
+      case WIFI_AUTH_WPA2_WPA3_PSK:   return "WPA2/WPA3";
+      default:                        return "other";
+    }
+}
+
+static int cmd_wifi_scan(int argc, char **argv)
+{
+  if (!s_wifi_initialized)
+    {
+      printf("wifi_scan: Wi-Fi stack not initialized\n");
+      return 1;
+    }
+
+  printf("Scanning Wi-Fi networks...\n");
+  esp_err_t err = esp_wifi_scan_start(NULL, true);
+  if (err != ESP_OK)
+    {
+      printf("wifi_scan: scan failed (%s)\n", esp_err_to_name(err));
+      return 1;
+    }
+
+  uint16_t found = 0;
+  esp_wifi_scan_get_ap_num(&found);
+  uint16_t count = found > 20 ? 20 : found;
+  wifi_ap_record_t *records = malloc(count * sizeof(wifi_ap_record_t));
+  if (!records)
+    {
+      printf("wifi_scan: out of memory\n");
+      return 1;
+    }
+
+  esp_wifi_scan_get_ap_records(&count, records);
+  printf("Found %u networks (showing %u):\n", (unsigned)found, (unsigned)count);
+  printf("  %-32s  %-4s  %-8s  %-10s\n", "SSID", "CHAN", "RSSI", "AUTH");
+  printf("  --------------------------------  ----  --------  ----------\n");
+  for (uint16_t i = 0; i < count; i++)
+    {
+      printf("  %-32s  %4d  %4d dBm  %s\n",
+             (const char *)records[i].ssid,
+             records[i].primary,
+             records[i].rssi,
+             auth_name(records[i].authmode));
+    }
+  free(records);
+  return 0;
+}
+
+static int cmd_wifi_connect(int argc, char **argv)
+{
+  if (!s_wifi_initialized)
+    {
+      printf("wifi_connect: Wi-Fi stack not initialized\n");
+      return 1;
+    }
+
+  if (argc < 2)
+    {
+      printf("Usage: wifi_connect <ssid> [password]\n");
+      return 1;
+    }
+
+  wifi_config_t wifi_cfg = {0};
+  strncpy((char *)wifi_cfg.sta.ssid, argv[1], sizeof(wifi_cfg.sta.ssid) - 1);
+  if (argc >= 3)
+    {
+      strncpy((char *)wifi_cfg.sta.password, argv[2], sizeof(wifi_cfg.sta.password) - 1);
+    }
+
+  esp_wifi_disconnect();
+  s_wifi_connected = false;
+  esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+
+  printf("Connecting to %s...\n", argv[1]);
+  esp_wifi_connect();
+
+  if (xSemaphoreTake(s_ip_sem, pdMS_TO_TICKS(15000)) == pdTRUE)
+    {
+      esp_netif_ip_info_t ip_info;
+      esp_netif_get_ip_info(s_sta_netif, &ip_info);
+      printf("Connected successfully! IP: " IPSTR ", Gateway: " IPSTR "\n",
+             IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
+      return 0;
+    }
+  else
+    {
+      printf("Connection timed out.\n");
+      return 1;
+    }
+}
+
+static int cmd_wifi_disconnect(int argc, char **argv)
+{
+  if (!s_wifi_initialized)
+    {
+      printf("wifi_disconnect: Wi-Fi stack not initialized\n");
+      return 1;
+    }
+  esp_wifi_disconnect();
+  s_wifi_connected = false;
+  printf("Disconnected from Wi-Fi\n");
+  return 0;
+}
+
+static int cmd_ifconfig(int argc, char **argv)
+{
+  if (!s_wifi_initialized || !s_sta_netif)
+    {
+      printf("ifconfig: interface not initialized\n");
+      return 1;
+    }
+
+  esp_netif_ip_info_t ip_info;
+  esp_netif_get_ip_info(s_sta_netif, &ip_info);
+
+  uint8_t mac[6] = {0};
+  esp_wifi_get_mac(WIFI_IF_STA, mac);
+
+  printf("wlan0: flags=%s\n", s_wifi_connected ? "UP,CONNECTED" : "DOWN");
+  printf("       inet " IPSTR " netmask " IPSTR " broadcast " IPSTR "\n",
+         IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&ip_info.gw));
+  return 0;
+}
+
+static void ping_on_success(esp_ping_handle_t hdl, void *args)
+{
+  uint8_t ttl;
+  uint16_t seqno;
+  uint32_t elapsed_time, recv_len;
+  ip_addr_t target_addr;
+  esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_TTL, &ttl, sizeof(ttl));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_SIZE, &recv_len, sizeof(recv_len));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_TIMEGAP, &elapsed_time, sizeof(elapsed_time));
+  printf("%lu bytes from %s: icmp_seq=%u ttl=%u time=%lu ms\n",
+         (unsigned long)recv_len, inet_ntoa(target_addr.u_addr.ip4), seqno, ttl, (unsigned long)elapsed_time);
+}
+
+static void ping_on_timeout(esp_ping_handle_t hdl, void *args)
+{
+  uint16_t seqno;
+  ip_addr_t target_addr;
+  esp_ping_get_profile(hdl, ESP_PING_PROF_SEQNO, &seqno, sizeof(seqno));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_IPADDR, &target_addr, sizeof(target_addr));
+  printf("From %s icmp_seq=%u Request timeout\n",
+         inet_ntoa(target_addr.u_addr.ip4), seqno);
+}
+
+static void ping_on_end(esp_ping_handle_t hdl, void *args)
+{
+  SemaphoreHandle_t sem = (SemaphoreHandle_t)args;
+  uint32_t transmitted = 0, received = 0, total_time_ms = 0;
+  esp_ping_get_profile(hdl, ESP_PING_PROF_REQUEST, &transmitted, sizeof(transmitted));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &received, sizeof(received));
+  esp_ping_get_profile(hdl, ESP_PING_PROF_DURATION, &total_time_ms, sizeof(total_time_ms));
+
+  printf("--- ping statistics ---\n");
+  printf("%lu packets transmitted, %lu received, %d%% packet loss, time %lu ms\n",
+         (unsigned long)transmitted, (unsigned long)received,
+         transmitted > 0 ? (int)((transmitted - received) * 100 / transmitted) : 0,
+         (unsigned long)total_time_ms);
+  esp_ping_delete_session(hdl);
+  if (sem) xSemaphoreGive(sem);
+}
+
+static int cmd_ping(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: ping <host_or_ip>\n");
+      return 1;
+    }
+
+  ip_addr_t target_addr;
+  struct addrinfo hint = { .ai_family = AF_INET };
+  struct addrinfo *res = NULL;
+  if (getaddrinfo(argv[1], NULL, &hint, &res) != 0 || res == NULL)
+    {
+      printf("ping: cannot resolve host %s\n", argv[1]);
+      return 1;
+    }
+
+  struct sockaddr_in *saddr = (struct sockaddr_in *)res->ai_addr;
+  inet_addr_to_ip4addr(ip_2_ip4(&target_addr), &saddr->sin_addr);
+  target_addr.type = IPADDR_TYPE_V4;
+  freeaddrinfo(res);
+
+  SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+  esp_ping_config_t ping_config = ESP_PING_DEFAULT_CONFIG();
+  ping_config.target_addr = target_addr;
+  ping_config.count = 4;
+
+  esp_ping_callbacks_t cbs = {
+      .cb_args = sem,
+      .on_ping_success = ping_on_success,
+      .on_ping_timeout = ping_on_timeout,
+      .on_ping_end = ping_on_end,
+  };
+
+  esp_ping_handle_t ping_hdl;
+  if (esp_ping_new_session(&ping_config, &cbs, &ping_hdl) != ESP_OK)
+    {
+      printf("ping: failed to create ping session\n");
+      vSemaphoreDelete(sem);
+      return 1;
+    }
+
+  printf("PING %s (%s): %lu data bytes\n",
+         argv[1], inet_ntoa(target_addr.u_addr.ip4), (unsigned long)ping_config.data_size);
+  esp_ping_start(ping_hdl);
+  xSemaphoreTake(sem, portMAX_DELAY);
+  vSemaphoreDelete(sem);
+  return 0;
+}
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+  if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED)
+    {
+      printf("\n[Wi-Fi] Connected to AP, negotiating DHCP lease...\n");
+    }
+  else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+      s_wifi_connected = false;
+      printf("\n[Wi-Fi] Disconnected\n");
+    }
+  else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
+      ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+      printf("\n[Wi-Fi] Acquired IP address: " IPSTR "\n", IP2STR(&event->ip_info.ip));
+      s_wifi_connected = true;
+      if (s_ip_sem)
+        {
+          xSemaphoreGive(s_ip_sem);
+        }
+    }
+}
+
+static void init_wifi(void)
+{
+  s_ip_sem = xSemaphoreCreateBinary();
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+      nvs_flash_erase();
+      err = nvs_flash_init();
+    }
+  if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "NVS flash init failed (%s)", esp_err_to_name(err));
+      return;
+    }
+
+  ESP_ERROR_CHECK(esp_netif_init());
+  ESP_ERROR_CHECK(esp_event_loop_create_default());
+  s_sta_netif = esp_netif_create_default_wifi_sta();
+
+  esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                      &wifi_event_handler, NULL, NULL);
+  esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                      &wifi_event_handler, NULL, NULL);
+
+  wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+  err = esp_wifi_init(&cfg);
+  if (err != ESP_OK)
+    {
+      ESP_LOGW(TAG, "esp_wifi_init failed: %s (SDIO link to C6 not ready)", esp_err_to_name(err));
+      return;
+    }
+
+  esp_wifi_set_mode(WIFI_MODE_STA);
+  esp_wifi_start();
+  s_wifi_initialized = true;
+  ESP_LOGI(TAG, "Wi-Fi radio is up and ready");
 }
 
 static void register_commands(void)
@@ -625,6 +909,18 @@ static void register_commands(void)
           .func = &cmd_write,
       },
       {
+          .command = "nano",
+          .help = "Interactive terminal text editor",
+          .hint = "<filename>",
+          .func = &cmd_nano,
+      },
+      {
+          .command = "edit",
+          .help = "Alias for nano",
+          .hint = "<filename>",
+          .func = &cmd_nano,
+      },
+      {
           .command = "cp",
           .help = "Copy file",
           .hint = "<src> <dst>",
@@ -647,6 +943,36 @@ static void register_commands(void)
           .help = "Show filesystem usage",
           .hint = NULL,
           .func = &cmd_df,
+      },
+      {
+          .command = "wifi_scan",
+          .help = "Scan for Wi-Fi access points",
+          .hint = NULL,
+          .func = &cmd_wifi_scan,
+      },
+      {
+          .command = "wifi_connect",
+          .help = "Connect to Wi-Fi access point",
+          .hint = "<ssid> [password]",
+          .func = &cmd_wifi_connect,
+      },
+      {
+          .command = "wifi_disconnect",
+          .help = "Disconnect from Wi-Fi",
+          .hint = NULL,
+          .func = &cmd_wifi_disconnect,
+      },
+      {
+          .command = "ifconfig",
+          .help = "Show network interface configuration",
+          .hint = NULL,
+          .func = &cmd_ifconfig,
+      },
+      {
+          .command = "ping",
+          .help = "Send ICMP echo requests to network host",
+          .hint = "<host_or_ip>",
+          .func = &cmd_ping,
       },
       {
           .command = "ps",
@@ -682,15 +1008,15 @@ static void register_commands(void)
 
 void app_main(void)
 {
+  ESP_LOGI(TAG, "Starting ESP32-P4 workstation firmware");
+
+  /* 1. Initialize MicroSD Card */
   power_on_slot();
 
-  esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-      .format_if_mount_failed = false,
-      .max_files = 5,
-      .allocation_unit_size = 16 * 1024,
-  };
+  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.slot = SDMMC_HOST_SLOT_0;
+  host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
-  /* Initialize the on-chip LDO (channel 4) for ESP32-P4 SDMMC IO pad domain */
   sd_pwr_ctrl_ldo_config_t ldo_config = {
       .ldo_chan_id = 4,
   };
@@ -698,44 +1024,60 @@ void app_main(void)
   esp_err_t ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
   if (ret != ESP_OK)
     {
-      ESP_LOGE(TAG, "Failed to create on-chip LDO driver: %s", esp_err_to_name(ret));
+      ESP_LOGE(TAG, "Failed to create LDO power control handle (%s)", esp_err_to_name(ret));
+    }
+  else
+    {
+      host.pwr_ctrl_handle = pwr_ctrl_handle;
     }
 
-  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.slot = SDMMC_HOST_SLOT_0;
-  host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-  host.pwr_ctrl_handle = pwr_ctrl_handle;
-
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+  slot_config.width = 4;
   slot_config.clk = PIN_TF_CLK;
   slot_config.cmd = PIN_TF_CMD;
   slot_config.d0 = PIN_TF_D0;
   slot_config.d1 = PIN_TF_D1;
   slot_config.d2 = PIN_TF_D2;
   slot_config.d3 = PIN_TF_D3;
-  slot_config.d4 = GPIO_NUM_NC;
-  slot_config.d5 = GPIO_NUM_NC;
-  slot_config.d6 = GPIO_NUM_NC;
-  slot_config.d7 = GPIO_NUM_NC;
-  slot_config.cd = GPIO_NUM_NC;
-  slot_config.wp = GPIO_NUM_NC;
-  slot_config.width = 4;
-  slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+
+  esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+      .format_if_mount_failed = false,
+      .max_files = 5,
+      .allocation_unit_size = 16 * 1024,
+  };
 
   sdmmc_card_t *card = NULL;
-  ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config,
-                                &mount_config, &card);
+  ret = esp_vfs_fat_sdmmc_mount(SDCARD_MOUNT_POINT, &host, &slot_config, &mount_config, &card);
   if (ret == ESP_OK)
     {
-      ESP_LOGI(TAG, "SD card mounted at %s", MOUNT_POINT);
-      sdmmc_card_print_info(stdout, card);
+      ESP_LOGI(TAG, "MicroSD card mounted at %s", SDCARD_MOUNT_POINT);
     }
   else
     {
       ESP_LOGE(TAG, "Failed to mount SD card (%s)", esp_err_to_name(ret));
     }
 
-  /* Initialize the interactive REPL console with nsh> prompt */
+  /* 2. Initialize LittleFS on Internal Flash */
+  esp_vfs_littlefs_conf_t lfs_conf = {
+      .base_path = LITTLEFS_MOUNT_POINT,
+      .partition_label = "storage",
+      .format_if_mount_failed = true,
+      .dont_mount = false,
+  };
+  ret = esp_vfs_littlefs_register(&lfs_conf);
+  if (ret == ESP_OK)
+    {
+      ESP_LOGI(TAG, "LittleFS mounted at %s", LITTLEFS_MOUNT_POINT);
+    }
+  else
+    {
+      ESP_LOGE(TAG, "Failed to mount LittleFS (%s)", esp_err_to_name(ret));
+    }
+
+  /* 3. Initialize Wi-Fi via onboard ESP32-C6 */
+  init_wifi();
+
+  /* 4. Initialize Interactive REPL Console */
   esp_console_repl_t *repl = NULL;
   esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
   repl_config.prompt = "nsh> ";
@@ -749,8 +1091,10 @@ void app_main(void)
 
   printf("\n");
   printf("====================================================\n");
-  printf("  ESP32-P4 FreeRTOS Shell (ESP-IDF v%s)\n", esp_get_idf_version());
-  printf("  SD card mounted at /sdcard (128 GB)\n");
+  printf("  ESP32-P4 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
+  printf("  Storage: /sdcard (FATFS), /data (LittleFS)\n");
+  printf("  Network: Wi-Fi STA via ESP32-C6 coprocessor\n");
+  printf("  Editor:  nano <file> / edit <file>\n");
   printf("  Type 'help' to list available commands\n");
   printf("====================================================\n\n");
 
