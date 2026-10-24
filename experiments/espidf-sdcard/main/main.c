@@ -14,7 +14,9 @@
  */
 
 #include <dirent.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
@@ -32,17 +34,20 @@
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
 
-#define PIN_TF_PWR GPIO_NUM_45
-#define PIN_TF_CLK GPIO_NUM_43
-#define PIN_TF_CMD GPIO_NUM_44
-#define PIN_TF_D0  GPIO_NUM_39
-#define PIN_TF_D1  GPIO_NUM_40
-#define PIN_TF_D2  GPIO_NUM_41
-#define PIN_TF_D3  GPIO_NUM_42
+#define PIN_TF_PWR   GPIO_NUM_45
+#define PIN_TF_CLK   GPIO_NUM_43
+#define PIN_TF_CMD   GPIO_NUM_44
+#define PIN_TF_D0    GPIO_NUM_39
+#define PIN_TF_D1    GPIO_NUM_40
+#define PIN_TF_D2    GPIO_NUM_41
+#define PIN_TF_D3    GPIO_NUM_42
+#define PIN_C6_RESET GPIO_NUM_54
 
 #define MOUNT_POINT "/sdcard"
 
 static const char *TAG = "espidf_sdcard";
+
+static char s_cwd[256] = MOUNT_POINT;
 
 static void power_on_slot(void)
 {
@@ -62,9 +67,125 @@ static void power_on_slot(void)
   vTaskDelay(pdMS_TO_TICKS(300));
 }
 
+static void resolve_path(const char *in, char *out, size_t out_len)
+{
+  char combined[512];
+  if (!in || in[0] == '\0')
+    {
+      strncpy(out, s_cwd, out_len - 1);
+      out[out_len - 1] = '\0';
+      return;
+    }
+
+  if (in[0] == '/')
+    {
+      strncpy(combined, in, sizeof(combined) - 1);
+    }
+  else
+    {
+      snprintf(combined, sizeof(combined), "%s/%s", s_cwd, in);
+    }
+  combined[sizeof(combined) - 1] = '\0';
+
+  char segments[16][64];
+  int count = 0;
+
+  char copy[512];
+  strncpy(copy, combined, sizeof(copy) - 1);
+  copy[sizeof(copy) - 1] = '\0';
+
+  char *saveptr = NULL;
+  char *tok = strtok_r(copy, "/", &saveptr);
+  while (tok != NULL)
+    {
+      if (strcmp(tok, ".") == 0)
+        {
+          /* Current dir, ignore */
+        }
+      else if (strcmp(tok, "..") == 0)
+        {
+          if (count > 0)
+            {
+              count--;
+            }
+        }
+      else if (tok[0] != '\0')
+        {
+          if (count < 16)
+            {
+              strncpy(segments[count], tok, sizeof(segments[count]) - 1);
+              segments[count][sizeof(segments[count]) - 1] = '\0';
+              count++;
+            }
+        }
+      tok = strtok_r(NULL, "/", &saveptr);
+    }
+
+  if (count == 0)
+    {
+      strncpy(out, "/", out_len - 1);
+      out[out_len - 1] = '\0';
+      return;
+    }
+
+  out[0] = '\0';
+  for (int i = 0; i < count; i++)
+    {
+      strncat(out, "/", out_len - strlen(out) - 1);
+      strncat(out, segments[i], out_len - strlen(out) - 1);
+    }
+}
+
+static int cmd_pwd(int argc, char **argv)
+{
+  printf("%s\n", s_cwd);
+  return 0;
+}
+
+static int cmd_cd(int argc, char **argv)
+{
+  char target[256];
+  if (argc < 2)
+    {
+      resolve_path(MOUNT_POINT, target, sizeof(target));
+    }
+  else
+    {
+      resolve_path(argv[1], target, sizeof(target));
+    }
+
+  if (strcmp(target, "/") == 0)
+    {
+      strncpy(s_cwd, "/", sizeof(s_cwd) - 1);
+      s_cwd[sizeof(s_cwd) - 1] = '\0';
+      return 0;
+    }
+
+  DIR *d = opendir(target);
+  if (!d)
+    {
+      printf("cd: %s: No such directory\n", target);
+      return 1;
+    }
+  closedir(d);
+
+  strncpy(s_cwd, target, sizeof(s_cwd) - 1);
+  s_cwd[sizeof(s_cwd) - 1] = '\0';
+  return 0;
+}
+
 static int cmd_ls(int argc, char **argv)
 {
-  const char *path = (argc > 1) ? argv[1] : MOUNT_POINT;
+  char path[256];
+  resolve_path(argc > 1 ? argv[1] : s_cwd, path, sizeof(path));
+
+  if (strcmp(path, "/") == 0)
+    {
+      printf("Directory: /\n");
+      printf("  <DIR>         sdcard\n");
+      return 0;
+    }
+
   DIR *dir = opendir(path);
   if (!dir)
     {
@@ -76,7 +197,7 @@ static int cmd_ls(int argc, char **argv)
   struct dirent *de;
   while ((de = readdir(dir)) != NULL)
     {
-      char full_path[300];
+      char full_path[512];
       snprintf(full_path, sizeof(full_path), "%s/%s", path, de->d_name);
       struct stat st;
       if (stat(full_path, &st) == 0)
@@ -99,6 +220,81 @@ static int cmd_ls(int argc, char **argv)
   return 0;
 }
 
+static void tree_traverse(const char *dir_path, int depth, int *dir_count, int *file_count)
+{
+  if (depth > 6)
+    {
+      return;
+    }
+
+  DIR *dir = opendir(dir_path);
+  if (!dir)
+    {
+      return;
+    }
+
+  struct dirent *de;
+  while ((de = readdir(dir)) != NULL)
+    {
+      if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+        {
+          continue;
+        }
+
+      char sub_path[512];
+      snprintf(sub_path, sizeof(sub_path), "%s/%s", dir_path, de->d_name);
+
+      struct stat st;
+      bool is_dir = false;
+      if (stat(sub_path, &st) == 0 && S_ISDIR(st.st_mode))
+        {
+          is_dir = true;
+        }
+
+      for (int i = 0; i < depth; i++)
+        {
+          printf("  ");
+        }
+
+      if (is_dir)
+        {
+          printf("+-- %s/\n", de->d_name);
+          (*dir_count)++;
+          tree_traverse(sub_path, depth + 1, dir_count, file_count);
+        }
+      else
+        {
+          printf("|-- %s (%lu B)\n", de->d_name, (unsigned long)st.st_size);
+          (*file_count)++;
+        }
+    }
+  closedir(dir);
+}
+
+static int cmd_tree(int argc, char **argv)
+{
+  char target[256];
+  resolve_path(argc > 1 ? argv[1] : s_cwd, target, sizeof(target));
+
+  if (strcmp(target, "/") == 0)
+    {
+      printf("/\n");
+      printf("+-- sdcard/\n");
+      int dir_count = 1;
+      int file_count = 0;
+      tree_traverse(MOUNT_POINT, 1, &dir_count, &file_count);
+      printf("\n%d directories, %d files\n", dir_count, file_count);
+      return 0;
+    }
+
+  printf("%s\n", target);
+  int dir_count = 0;
+  int file_count = 0;
+  tree_traverse(target, 0, &dir_count, &file_count);
+  printf("\n%d directories, %d files\n", dir_count, file_count);
+  return 0;
+}
+
 static int cmd_cat(int argc, char **argv)
 {
   if (argc < 2)
@@ -107,18 +303,13 @@ static int cmd_cat(int argc, char **argv)
       return 1;
     }
 
-  const char *path = argv[1];
-  char full_path[300];
-  if (path[0] != '/')
-    {
-      snprintf(full_path, sizeof(full_path), "%s/%s", MOUNT_POINT, path);
-      path = full_path;
-    }
+  char full_path[256];
+  resolve_path(argv[1], full_path, sizeof(full_path));
 
-  FILE *f = fopen(path, "r");
+  FILE *f = fopen(full_path, "r");
   if (!f)
     {
-      printf("cat: failed to open '%s'\n", path);
+      printf("cat: failed to open '%s'\n", full_path);
       return 1;
     }
 
@@ -142,18 +333,13 @@ static int cmd_write(int argc, char **argv)
       return 1;
     }
 
-  const char *path = argv[1];
-  char full_path[300];
-  if (path[0] != '/')
-    {
-      snprintf(full_path, sizeof(full_path), "%s/%s", MOUNT_POINT, path);
-      path = full_path;
-    }
+  char full_path[256];
+  resolve_path(argv[1], full_path, sizeof(full_path));
 
-  FILE *f = fopen(path, "w");
+  FILE *f = fopen(full_path, "w");
   if (!f)
     {
-      printf("write: failed to open '%s'\n", path);
+      printf("write: failed to open '%s'\n", full_path);
       return 1;
     }
 
@@ -167,8 +353,103 @@ static int cmd_write(int argc, char **argv)
     }
   fputc('\n', f);
   fclose(f);
-  printf("Wrote to %s\n", path);
+  printf("Wrote to %s\n", full_path);
   return 0;
+}
+
+static int cmd_cp(int argc, char **argv)
+{
+  if (argc < 3)
+    {
+      printf("Usage: cp <source> <destination>\n");
+      return 1;
+    }
+
+  char src[256];
+  char dst[256];
+  resolve_path(argv[1], src, sizeof(src));
+  resolve_path(argv[2], dst, sizeof(dst));
+
+  /* If dst is an existing directory, append src filename */
+  DIR *d = opendir(dst);
+  if (d)
+    {
+      closedir(d);
+      const char *slash = strrchr(src, '/');
+      const char *basename = slash ? slash + 1 : src;
+      char new_dst[512];
+      snprintf(new_dst, sizeof(new_dst), "%s/%s", dst, basename);
+      strncpy(dst, new_dst, sizeof(dst) - 1);
+      dst[sizeof(dst) - 1] = '\0';
+    }
+
+  FILE *fsrc = fopen(src, "rb");
+  if (!fsrc)
+    {
+      printf("cp: cannot open source '%s'\n", src);
+      return 1;
+    }
+
+  FILE *fdst = fopen(dst, "wb");
+  if (!fdst)
+    {
+      printf("cp: cannot create destination '%s'\n", dst);
+      fclose(fsrc);
+      return 1;
+    }
+
+  char buf[512];
+  size_t n;
+  size_t total = 0;
+  while ((n = fread(buf, 1, sizeof(buf), fsrc)) > 0)
+    {
+      fwrite(buf, 1, n, fdst);
+      total += n;
+    }
+  fclose(fsrc);
+  fclose(fdst);
+  printf("Copied %lu bytes to %s\n", (unsigned long)total, dst);
+  return 0;
+}
+
+static int cmd_rm(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: rm <filename>\n");
+      return 1;
+    }
+
+  char full_path[256];
+  resolve_path(argv[1], full_path, sizeof(full_path));
+
+  if (unlink(full_path) == 0)
+    {
+      printf("Removed %s\n", full_path);
+      return 0;
+    }
+  printf("rm: failed to remove %s\n", full_path);
+  return 1;
+}
+
+static int cmd_mkdir(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: mkdir <dirname>\n");
+      return 1;
+    }
+
+  char full_path[256];
+  resolve_path(argv[1], full_path, sizeof(full_path));
+
+  if (mkdir(full_path, 0777) == 0)
+    {
+      printf("Created directory %s\n", full_path);
+      return 0;
+    }
+  printf("mkdir: failed to create %s\n", full_path);
+  return 1;
 }
 
 static int cmd_df(int argc, char **argv)
@@ -194,6 +475,65 @@ static int cmd_df(int argc, char **argv)
   return 0;
 }
 
+static const char *task_state_name(eTaskState s)
+{
+  switch (s)
+    {
+      case eRunning:   return "RUNNING";
+      case eReady:     return "READY";
+      case eBlocked:   return "BLOCKED";
+      case eSuspended: return "SUSPEND";
+      case eDeleted:   return "DELETED";
+      default:         return "UNKNOWN";
+    }
+}
+
+static int cmd_ps(int argc, char **argv)
+{
+  UBaseType_t task_count = uxTaskGetNumberOfTasks();
+  TaskStatus_t *status_array = malloc(task_count * sizeof(TaskStatus_t));
+  if (!status_array)
+    {
+      printf("ps: out of memory\n");
+      return 1;
+    }
+
+  task_count = uxTaskGetSystemState(status_array, task_count, NULL);
+
+  printf("%-4s  %-16s  %-8s  %-4s  %-8s  %-5s\n",
+         "PID", "NAME", "STATE", "PRIO", "STACK-HW", "CORE");
+  printf("----  ----------------  --------  ----  --------  -----\n");
+
+  for (UBaseType_t i = 0; i < task_count; i++)
+    {
+      char core_str[8] = "Any";
+#if ( ( configUSE_CORE_AFFINITY == 1 ) && ( configNUMBER_OF_CORES > 1 ) )
+      if (status_array[i].uxCoreAffinityMask == 1)
+        {
+          snprintf(core_str, sizeof(core_str), "0");
+        }
+      else if (status_array[i].uxCoreAffinityMask == 2)
+        {
+          snprintf(core_str, sizeof(core_str), "1");
+        }
+      else if (status_array[i].uxCoreAffinityMask == 3)
+        {
+          snprintf(core_str, sizeof(core_str), "0/1");
+        }
+#endif
+      printf("%-4lu  %-16s  %-8s  %-4lu  %-8lu  %-5s\n",
+             (unsigned long)status_array[i].xTaskNumber,
+             status_array[i].pcTaskName,
+             task_state_name(status_array[i].eCurrentState),
+             (unsigned long)status_array[i].uxCurrentPriority,
+             (unsigned long)status_array[i].usStackHighWaterMark,
+             core_str);
+    }
+
+  free(status_array);
+  return 0;
+}
+
 static int cmd_free(int argc, char **argv)
 {
   printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
@@ -210,60 +550,30 @@ static int cmd_uname(int argc, char **argv)
   return 0;
 }
 
-static int cmd_rm(int argc, char **argv)
-{
-  if (argc < 2)
-    {
-      printf("Usage: rm <filename>\n");
-      return 1;
-    }
-
-  const char *path = argv[1];
-  char full_path[300];
-  if (path[0] != '/')
-    {
-      snprintf(full_path, sizeof(full_path), "%s/%s", MOUNT_POINT, path);
-      path = full_path;
-    }
-
-  if (unlink(path) == 0)
-    {
-      printf("Removed %s\n", path);
-      return 0;
-    }
-  printf("rm: failed to remove %s\n", path);
-  return 1;
-}
-
-static int cmd_mkdir(int argc, char **argv)
-{
-  if (argc < 2)
-    {
-      printf("Usage: mkdir <dirname>\n");
-      return 1;
-    }
-
-  const char *path = argv[1];
-  char full_path[300];
-  if (path[0] != '/')
-    {
-      snprintf(full_path, sizeof(full_path), "%s/%s", MOUNT_POINT, path);
-      path = full_path;
-    }
-
-  if (mkdir(path, 0777) == 0)
-    {
-      printf("Created directory %s\n", path);
-      return 0;
-    }
-  printf("mkdir: failed to create %s\n", path);
-  return 1;
-}
-
 static int cmd_reboot(int argc, char **argv)
 {
   printf("Restarting system...\n");
   esp_restart();
+  return 0;
+}
+
+static int cmd_reset_c6(int argc, char **argv)
+{
+  gpio_config_t io_conf = {
+      .pin_bit_mask = 1ULL << PIN_C6_RESET,
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+  gpio_config(&io_conf);
+
+  printf("Holding ESP32-C6 in reset (GPIO 54 = 0)...\n");
+  gpio_set_level(PIN_C6_RESET, 0);
+  vTaskDelay(pdMS_TO_TICKS(200));
+
+  printf("Releasing ESP32-C6 from reset (GPIO 54 = 1)...\n");
+  gpio_set_level(PIN_C6_RESET, 1);
   return 0;
 }
 
@@ -273,10 +583,34 @@ static void register_commands(void)
 
   const esp_console_cmd_t cmds[] = {
       {
+          .command = "reset_c6",
+          .help = "Pulse hardware reset line (GPIO 54) to ESP32-C6",
+          .hint = NULL,
+          .func = &cmd_reset_c6,
+      },
+      {
+          .command = "pwd",
+          .help = "Print current working directory",
+          .hint = NULL,
+          .func = &cmd_pwd,
+      },
+      {
+          .command = "cd",
+          .help = "Change working directory",
+          .hint = "[<path>]",
+          .func = &cmd_cd,
+      },
+      {
           .command = "ls",
-          .help = "List files in directory (default: /sdcard)",
+          .help = "List files in directory",
           .hint = "[<path>]",
           .func = &cmd_ls,
+      },
+      {
+          .command = "tree",
+          .help = "List directory contents in a tree structure",
+          .hint = "[<path>]",
+          .func = &cmd_tree,
       },
       {
           .command = "cat",
@@ -291,22 +625,10 @@ static void register_commands(void)
           .func = &cmd_write,
       },
       {
-          .command = "df",
-          .help = "Show filesystem usage",
-          .hint = NULL,
-          .func = &cmd_df,
-      },
-      {
-          .command = "free",
-          .help = "Show available heap memory",
-          .hint = NULL,
-          .func = &cmd_free,
-      },
-      {
-          .command = "uname",
-          .help = "Show OS and chip information",
-          .hint = NULL,
-          .func = &cmd_uname,
+          .command = "cp",
+          .help = "Copy file",
+          .hint = "<src> <dst>",
+          .func = &cmd_cp,
       },
       {
           .command = "rm",
@@ -319,6 +641,30 @@ static void register_commands(void)
           .help = "Create a directory",
           .hint = "<dirname>",
           .func = &cmd_mkdir,
+      },
+      {
+          .command = "df",
+          .help = "Show filesystem usage",
+          .hint = NULL,
+          .func = &cmd_df,
+      },
+      {
+          .command = "ps",
+          .help = "Show FreeRTOS tasks",
+          .hint = NULL,
+          .func = &cmd_ps,
+      },
+      {
+          .command = "free",
+          .help = "Show available heap memory",
+          .hint = NULL,
+          .func = &cmd_free,
+      },
+      {
+          .command = "uname",
+          .help = "Show OS and chip information",
+          .hint = NULL,
+          .func = &cmd_uname,
       },
       {
           .command = "reboot",
@@ -378,7 +724,7 @@ void app_main(void)
 
   sdmmc_card_t *card = NULL;
   ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config,
-                               &mount_config, &card);
+                                &mount_config, &card);
   if (ret == ESP_OK)
     {
       ESP_LOGI(TAG, "SD card mounted at %s", MOUNT_POINT);
@@ -394,6 +740,7 @@ void app_main(void)
   esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
   repl_config.prompt = "nsh> ";
   repl_config.max_cmdline_length = 256;
+  repl_config.task_stack_size = 8192;
 
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));

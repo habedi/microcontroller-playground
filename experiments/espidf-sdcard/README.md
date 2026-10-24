@@ -25,14 +25,19 @@ The TF card slot on the Waveshare board links to the ESP32-P4 SDMMC controller p
 The firmware runs `esp_console` on UART0 with prompt `nsh> `:
 
 - `help`: list available commands
-- `ls [<path>]`: directory listing (defaults to `/sdcard`)
+- `pwd`: print current working directory
+- `cd [<path>]`: change working directory
+- `ls [<path>]`: list files and directories
+- `tree [<path>]`: display recursive directory hierarchy with file sizes
 - `cat <filename>`: display file contents
 - `write <filename> <text>`: write text to a file
-- `df`: display storage capacity and free space on `/sdcard`
-- `free`: display heap memory statistics
-- `uname`: display operating system and chip revision
-- `mkdir <dirname>`: create directory
+- `cp <source> <destination>`: copy a file
 - `rm <filename>`: delete a file
+- `mkdir <dirname>`: create directory
+- `df`: display storage capacity, used space, and free space
+- `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
+- `free`: display heap memory statistics
+- `uname`: display operating system, chip revision, and core count
 - `reboot`: restart the board
 
 ### Build and Flash

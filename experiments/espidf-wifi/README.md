@@ -5,15 +5,54 @@ onboard ESP32-C6 over SDIO.
 
 - Board: ESP32-P4 function EV board, chip revision v1.3
 - OS: FreeRTOS, through ESP-IDF v5.5.5
-- Result: blocked. The host software is correct and the SDIO transport starts, but the C6 never answers, so
-  `esp_wifi_init()` fails. The C6 needs new slave firmware, which needs a UART adapter on the `PROG_C6` header.
+- Result: working. Waveshare shipped the onboard ESP32-C6 with blank flash, which held the chip in a watchdog reboot loop. Flashing official Espressif ESP-Hosted SDIO slave firmware v3.0.10 through the `H4` UART pads established the SDIO link. Wi-Fi network scanning from the ESP32-P4 succeeds over SDIO at 40 MHz.
 
 
-### The Board Is Not Espressif's Reference
+### Hardware Architecture and Pinout
 
-This board is a Waveshare ESP32-P4-WIFI6, not the ESP32-P4-Function-EV-Board that earlier notes named. It has no
-`PROG_C6` header. Waveshare exposes the C6 as "ESP32-C6 UART Pads", so any mention of that header below describes
-Espressif's board and not this one. Reaching the C6 here needs a soldered connection.
+The ESP32-P4 has no onboard radio. The Waveshare ESP32-P4-WIFI6 pairs it with an ESP32-C6-MINI-1 coprocessor connected over SDIO Host Slot 1:
+
+- SDIO signals: CLK on GPIO 18, CMD on GPIO 19, and D0 through D3 on GPIO 14 through 17.
+- Reset control: GPIO 54 on the ESP32-P4 drives the C6 hardware enable line (`CHIP_PU`) through resistor R83. The physical RST button on the board resets only the ESP32-P4, not the ESP32-C6.
+- Programming pads: unpopulated 4-hole cluster labeled `H4` directly above the USB-C connector. From left to right:
+  - Hole 1 (square pad): `IO9` (strapping pin; hold to GND on boot for download mode)
+  - Hole 2 (round pad): `GND`
+  - Hole 3 (round pad): `RXD` (connect to adapter TXD)
+  - Hole 4 (round pad): `TXD` (connect to adapter RXD)
+
+### Factory Defect and Diagnosis
+
+Reading the C6 serial console through `H4` at 115200 baud revealed continuous bootloader crashes:
+
+```
+rst:0x7 (TG0_WDT_HPSYS),boot:0xc (SPI_FAST_FLASH_BOOT)
+invalid header: 0xffffffff
+```
+
+The flash memory was unprogrammed (`0xFF`), so no slave firmware was present from the factory. Because watchdog resets (`rst:0x7`) do not re-sample strapping pins, the C6 remained stuck in flash boot mode until the ESP32-P4 pulsed GPIO 54 with Hole 1 held to ground, placing the C6 into ROM download mode.
+
+### Flashing the Coprocessor
+
+Official Espressif `esp_hosted` v3.0.10 slave firmware was built from source for target `esp32c6` using the SDIO transport. Flashing was performed with `tools/flash_official_c6.py` at 230400 baud:
+
+- `0x00000000`: `bootloader.bin` (22 KB)
+- `0x00008000`: `partition-table.bin` (3 KB)
+- `0x0000d000`: `ota_data_initial.bin` (8 KB)
+- `0x00010000`: `eh_cp_wifi_scan.bin` (1.09 MB)
+
+### Verification
+
+With Hole 1 disconnected from ground, the ESP32-P4 boots and pulses GPIO 54. The C6 boots into the newly written slave firmware, negotiates 4-bit SDIO at 40 MHz, and establishes RPC channels with the host:
+
+```
+eh_sdio: transport[host]: SDIO 4-bit 40000 kHz CLK=18 CMD=19 D0=14 D1=15 D2=16 D3=17 RESET=54
+eh_init_evt: RPC version negotiated: V2
+eh_init_evt: esp-hosted fw versions: host=3.0.10 coprocessor=3.0.10 (match)
+eh_init_evt: SDIO SW_AGGR negotiated (e2h=15872B h2e=15872B)
+espidf-wifi: radio is up, the C6 is answering
+```
+
+The Wi-Fi scan completes successfully and returns visible access points in range.
 
 ### Build and Run
 
@@ -46,60 +85,20 @@ eh_sdio: ensure_slave_bus_ready failed: -1
 `0x107` is `ESP_ERR_TIMEOUT`, and the failing operation is a CMD52 read of register `0x3`, which is ordinary
 SDIO enumeration rather than anything specific to ESP-Hosted. The C6 is not presenting as an SDIO card at all.
 
-### What Was Ruled Out
+### Prior State and Root Cause
 
-Clock speed. 40 MHz and 20 MHz fail identically.
-
-Host software generation. Three of them fail identically: `esp_hosted` 3.0.6, 2.7.4, and 1.4.7. The last is
-what Waveshare pins for ESP-IDF 5.x in its own working ESP32-P4 Wi-Fi example, at
-https://github.com/waveshareteam/esp32-p4-platform, paired with `esp_wifi_remote` 0.14.5. Every one of them
-fails on the same call, a CMD52 read of CCCR register `0x3` on function 0, which 1.4.7 turns into an assertion
-and a boot loop:
+Before flashing the C6 coprocessor, the SDIO transport failed at CCCR register read:
 
 ```
-sdio_wrapper.c line 135, hosted_sdio_card_fn_init
-expression: sdmmc_io_read_byte(card, SDIO_FUNC_0, SD_IO_CCCR_FN_READY, &ior)
+sdmmc_io: sdmmc_io_read_byte: sdmmc_io_rw_direct (read 0x3) returned 0x107
+eh_host_port_sdio: sdio_card_fn_init failed
+eh_sdio: card init failed
+eh_sdio: ensure_slave_bus_ready failed: -1
 ```
 
-Three generations spanning two years of the component's history agree, so this is not a version mismatch on the
-host side.
+Connecting a 3.3 V USB-to-UART adapter to the `H4` pads confirmed the root cause: the onboard flash on the ESP32-C6 was entirely unprogrammed (`0xFF`), causing an infinite watchdog loop. Writing the official Espressif `esp_hosted` SDIO slave firmware resolved the timeout and enabled normal network operations.
 
-Configuration. The component sets `RESET_GPIO=54`, SDIO slot 1, 4-bit width, and the correct pins by itself,
-matching the board documentation.
+### Program Design
 
-### The Likely Cause
-
-The C6 ships with ESP-Hosted slave firmware v0.0.6, and Espressif recommends upgrading it. A slave that old
-paired with a 3.x host is the obvious suspect, and failing at SDIO enumeration is consistent with the C6 not
-running usable slave firmware.
-
-This failure is widely reported on ESP32-P4 and ESP32-C6 boards, including
-https://github.com/espressif/esp-hosted-mcu/issues/66,
-https://github.com/espressif/esp-hosted-mcu/issues/167, and
-https://github.com/espressif/arduino-esp32/issues/11404. One report describes a board shipped without the slave
-firmware loaded at all.
-
-### The Cable Diagnoses as Well as Repairs
-
-Wiring a UART to the `PROG_C6` header is worth doing even before flashing anything, because reading the C6's
-own console distinguishes cases that look identical from the P4 side. Silence means the chip is not running.
-A boot log means it runs but is not presenting as an SDIO slave. Either answer narrows the problem in a way
-nothing done from the host can.
-
-### What Would Unblock It
-
-Flashing the C6 with matching slave firmware. Espressif documents two routes:
-
-- Over the air from the P4. This needs no extra hardware but does need a working link, so it cannot bootstrap
-  from here.
-- Serially through the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and explicitly not
-  VDD, with the P4 held in its bootloader so it does not interfere. This needs a 3.3 V USB to UART adapter.
-
-The second is the only one available from this state, which makes a 3.3 V USB to UART
-adapter a requirement for flashing the coprocessor on this board.
-
-### A Note on the Program
-
-`app_main()` deliberately does not call `ESP_ERROR_CHECK` on `esp_wifi_init()`. The first version did, which
-turned a failed probe into a panic and a boot loop, so the diagnosis scrolled past before it could be read. An
-experiment that exists to test whether something works should report the failure and stay alive.
+`app_main()` deliberately does not call `ESP_ERROR_CHECK` on `esp_wifi_init()`.
+If initialization fails, it logs the error and remains running in an idle loop rather than triggering an immediate restart, ensuring diagnostic output remains readable.
