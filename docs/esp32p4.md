@@ -416,7 +416,7 @@ least one block, so a 1 KB file can consume 64 KB. That suits a 30 MB volume hol
 
 Changing the block size changes the on-disk format, so `/data` reformats on the first boot after the switch.
 
-### Wireless Needs the C6, and the C6 Needs New Firmware
+### Wireless Works via ESP-Hosted After Flashing the C6
 
 The P4 has no radio, so Wi-Fi and Bluetooth mean driving the onboard ESP32-C6 over SDIO. Under NuttX there is no
 path at all: the `esp32p4-function-ev-board` port has no SDIO host driver, no Kconfig, and no configuration for
@@ -439,14 +439,26 @@ So enabling it switches ESP-Hosted off. The two are mutually exclusive, and the 
 `ESP_WIFI_CONTROLLER_TARGET="esp32"` rather than a C6. It builds cleanly and produces an image that can never
 reach the radio.
 
-With the correct pairing the host side works. The transport picks the right pins unaided, matching Espressif's
-documentation for this board, and then the C6 fails to enumerate as an SDIO card. See
-[../experiments/espidf-wifi](../experiments/espidf-wifi) for the log and for what was ruled out: both 40 and
-20 MHz clocks, and both the 3.0.6 and 2.7.4 host generations.
+With the correct pairing the host side works and selects SDIO slot 1 (CLK: GPIO 18, CMD: GPIO 19, D0 through D3:
+GPIO 14 through 17, and RESET: GPIO 54).
 
-The C6 ships with slave firmware v0.0.6, which Espressif recommends upgrading. Reflashing it needs a 3.3 V USB
-to UART adapter on the `PROG_C6` header, wiring `ESP_EN`, `ESP_TXD`, `ESP_RXD`, and `GND`, and not VDD, with the
-P4 held in its bootloader. The over-the-air route needs a working link and so cannot bootstrap from here.
+On initial bring-up, the C6 failed to enumerate (`returned 0x107`). Connecting a 3.3 V USB-to-UART adapter to
+the 4-pad `H4` cluster above the USB connector showed that Waveshare shipped the ESP32-C6 with completely blank
+flash (`0xFF`), leaving it stuck in a watchdog boot loop:
+
+```
+rst:0x7 (TG0_WDT_HPSYS),boot:0xc (SPI_FAST_FLASH_BOOT)
+invalid header: 0xffffffff
+```
+
+The C6 hardware enable line (`CHIP_PU`) is routed exclusively to the ESP32-P4's GPIO 54 through resistor R83.
+The physical RST button on the board resets only the P4. Holding `H4` Hole 1 (`IO9`) to ground while pulsing
+GPIO 54 latches the C6 into ROM download mode. Flashing official Espressif `esp_hosted` v3.0.10 SDIO slave
+firmware at 230400 baud resolved the issue completely.
+
+With the C6 flashed and Hole 1 floating, the P4 establishes 4-bit SDIO communication at 40 MHz and proxies
+Wi-Fi scanning successfully. See [../experiments/espidf-wifi](../experiments/espidf-wifi) for the full
+experiment details and reproduction steps.
 
 ### CPython Builds but Does Not Run
 
@@ -475,19 +487,13 @@ Two notes from the same boot. The Ethernet MAC error path trips an assertion in 
 flash driver reports that access beyond 16 MB is unsupported on this chip, which bears on the 30 MB filesystem
 configuration: it passes `fstest` and a 16 MB write, but the driver does not claim to support it.
 
-### Next Step
+### Upstream Defects and Findings
 
-Reaching the C6 needs a soldered connection to the "ESP32-C6 UART Pads", since this board has no programming
-header. Read its console before writing anything: silence and a boot log point at different faults.
-
-Two hypotheses are already dead. The SDIO pins are not wrong, because Waveshare's own Wi-Fi example sets no pin
-options and relies on the same component defaults we used. The host version pairing is not wrong either, because
-Waveshare pins `esp_hosted 1.4.*` with `esp_wifi_remote 0.14.*` and that combination fails here identically to
-2.7.4 and 3.0.6. What remains is the firmware on the C6, or a fault in the part or its wiring.
-
-Several defects are worth reporting upstream. None is in the silicon.
+Several defects identified during bring-up are worth reporting upstream. None is in the silicon.
 
 In the Espressif port: the unbounded spin in `esp_usbserial_write()`, the boot stopping while attaching interrupt
+source 22 with the USB console, the RTC returning nonsense after a reset, and the semaphore assertion in the EMAC
+error path when `emac_esp32_init` times out.
 source 22 with the USB console, the RTC returning nonsense after a reset, and the semaphore assertion in the EMAC
 error path when `emac_esp32_init` times out.
 
