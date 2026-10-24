@@ -16,7 +16,8 @@ ESP-IDF experiment providing an interactive NSH-compatible command shell on the 
 
 ### Interactive Commands
 
-The firmware runs `esp_console` on UART0 with prompt `nsh> `:
+The firmware runs `esp_console` on UART0 with prompt `nsh> `.
+Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
 
 - `help`: list available commands
 - `pwd`: print current working directory
@@ -37,6 +38,7 @@ The firmware runs `esp_console` on UART0 with prompt `nsh> `:
 - `ifconfig`: display network interface status and IP address
 - `ping <host>`: send ICMP echo requests to network host
 - `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
+- `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
 - `uname`: display operating system, chip revision, and core count
 - `reboot`: restart the board

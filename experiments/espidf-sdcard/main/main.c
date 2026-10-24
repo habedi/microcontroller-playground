@@ -31,8 +31,10 @@
 #include "esp_vfs_fat.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "linenoise/linenoise.h"
 #include "lwip/inet.h"
 #include "lwip/netdb.h"
 #include "nvs_flash.h"
@@ -489,20 +491,15 @@ static int cmd_ps(int argc, char **argv)
   for (UBaseType_t i = 0; i < task_count; i++)
     {
       char core_str[8] = "Any";
-#if ( ( configUSE_CORE_AFFINITY == 1 ) && ( configNUMBER_OF_CORES > 1 ) )
-      if (status_array[i].uxCoreAffinityMask == 1)
+      BaseType_t core = xTaskGetCoreID(status_array[i].xHandle);
+      if (core == 0)
         {
           snprintf(core_str, sizeof(core_str), "0");
         }
-      else if (status_array[i].uxCoreAffinityMask == 2)
+      else if (core == 1)
         {
           snprintf(core_str, sizeof(core_str), "1");
         }
-      else if (status_array[i].uxCoreAffinityMask == 3)
-        {
-          snprintf(core_str, sizeof(core_str), "Any");
-        }
-#endif
       printf("%-4u  %-16s  %-8s  %-4u  %-8u  %-5s\n",
              (unsigned)status_array[i].xTaskNumber,
              status_array[i].pcTaskName,
@@ -513,6 +510,143 @@ static int cmd_ps(int argc, char **argv)
     }
 
   free(status_array);
+  return 0;
+}
+
+static int cmd_top(int argc, char **argv)
+{
+  UBaseType_t task_count1 = uxTaskGetNumberOfTasks();
+  TaskStatus_t *status1 = malloc(task_count1 * sizeof(TaskStatus_t));
+  uint32_t total_time1 = 0;
+  if (!status1)
+    {
+      printf("top: out of memory\n");
+      return 1;
+    }
+  task_count1 = uxTaskGetSystemState(status1, task_count1, &total_time1);
+
+  /* Sample over 500 ms */
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  UBaseType_t task_count2 = uxTaskGetNumberOfTasks();
+  TaskStatus_t *status2 = malloc(task_count2 * sizeof(TaskStatus_t));
+  uint32_t total_time2 = 0;
+  if (!status2)
+    {
+      free(status1);
+      printf("top: out of memory\n");
+      return 1;
+    }
+  task_count2 = uxTaskGetSystemState(status2, task_count2, &total_time2);
+
+  uint32_t delta_time = total_time2 - total_time1;
+  if (delta_time == 0) delta_time = 1;
+#if (configNUMBER_OF_CORES > 1)
+  uint32_t total_capacity = delta_time * configNUMBER_OF_CORES;
+#else
+  uint32_t total_capacity = delta_time;
+#endif
+  if (total_capacity == 0) total_capacity = 1;
+
+  typedef struct {
+    UBaseType_t pid;
+    char name[configMAX_TASK_NAME_LEN];
+    eTaskState state;
+    UBaseType_t prio;
+    UBaseType_t stack_hw;
+    char core[8];
+    float cpu_pct;
+  } top_item_t;
+
+  top_item_t *items = malloc(task_count2 * sizeof(top_item_t));
+  if (!items)
+    {
+      free(status1);
+      free(status2);
+      printf("top: out of memory\n");
+      return 1;
+    }
+
+  float idle_pct = 0.0f;
+  for (UBaseType_t i = 0; i < task_count2; i++)
+    {
+      items[i].pid = status2[i].xTaskNumber;
+      strncpy(items[i].name, status2[i].pcTaskName, sizeof(items[i].name) - 1);
+      items[i].name[sizeof(items[i].name) - 1] = '\0';
+      items[i].state = status2[i].eCurrentState;
+      items[i].prio = status2[i].uxCurrentPriority;
+      items[i].stack_hw = status2[i].usStackHighWaterMark;
+
+      strncpy(items[i].core, "Any", sizeof(items[i].core));
+      BaseType_t core = xTaskGetCoreID(status2[i].xHandle);
+      if (core == 0)
+        {
+          snprintf(items[i].core, sizeof(items[i].core), "0");
+        }
+      else if (core == 1)
+        {
+          snprintf(items[i].core, sizeof(items[i].core), "1");
+        }
+
+      uint32_t task_time1 = 0;
+      for (UBaseType_t j = 0; j < task_count1; j++)
+        {
+          if (status1[j].xHandle == status2[i].xHandle)
+            {
+              task_time1 = status1[j].ulRunTimeCounter;
+              break;
+            }
+        }
+      uint32_t task_delta = status2[i].ulRunTimeCounter - task_time1;
+      items[i].cpu_pct = ((float)task_delta * 100.0f) / (float)total_capacity;
+      if (strncmp(items[i].name, "IDLE", 4) == 0)
+        {
+          idle_pct += items[i].cpu_pct;
+        }
+    }
+
+  /* Sort items descending by cpu_pct */
+  for (UBaseType_t i = 0; i < task_count2; i++)
+    {
+      for (UBaseType_t j = i + 1; j < task_count2; j++)
+        {
+          if (items[j].cpu_pct > items[i].cpu_pct)
+            {
+              top_item_t tmp = items[i];
+              items[i] = items[j];
+              items[j] = tmp;
+            }
+        }
+    }
+
+  float active_cpu = 100.0f - idle_pct;
+  if (active_cpu < 0.0f) active_cpu = 0.0f;
+  if (active_cpu > 100.0f) active_cpu = 100.0f;
+
+  printf("Tasks: %u total | Free Heap: %lu B | Min Free: %lu B\n",
+         (unsigned)task_count2, (unsigned long)esp_get_free_heap_size(),
+         (unsigned long)esp_get_minimum_free_heap_size());
+  printf("CPU Total Active Load: %.1f%%\n\n", active_cpu);
+  printf("%-4s  %-16s  %-8s  %-4s  %-6s  %-8s  %-5s\n",
+         "PID", "NAME", "STATE", "PRIO", "CPU%", "STACK-HW", "CORE");
+  printf("----  ----------------  --------  ----  ------  --------  -----\n");
+
+  for (UBaseType_t i = 0; i < task_count2; i++)
+    {
+      printf("%-4u  %-16s  %-8s  %-4u  %5.1f%%  %-8u  %-5s\n",
+             (unsigned)items[i].pid,
+             items[i].name,
+             task_state_name(items[i].state),
+             (unsigned)items[i].prio,
+             items[i].cpu_pct,
+             (unsigned)items[i].stack_hw,
+             items[i].core);
+    }
+  printf("\n");
+
+  free(items);
+  free(status1);
+  free(status2);
   return 0;
 }
 
@@ -861,6 +995,123 @@ static void init_wifi(void)
   ESP_LOGI(TAG, "Wi-Fi radio is up and ready");
 }
 
+/* Intercept write calls from linenoise to drop cursor position query (\x1b[6n).
+ * On serial UART links, querying terminal dimensions with DSR escape sequences
+ * causes terminals to send cursor reports that pollute the input buffer or throw
+ * the cursor to margin 999. Returning -1 here forces linenoise to immediately
+ * default to 80 columns without sending escape sequences or blocking UART.
+ */
+extern ssize_t __real_write(int fd, const void *buf, size_t count);
+
+ssize_t __wrap_write(int fd, const void *buf, size_t count)
+{
+  if (count >= 4 && ((const char *)buf)[0] == '\x1b' && ((const char *)buf)[1] == '[' &&
+      ((const char *)buf)[2] == '6' && ((const char *)buf)[3] == 'n')
+    {
+      return -1;
+    }
+  return __real_write(fd, buf, count);
+}
+
+static void custom_completion(const char *buf, linenoiseCompletions *lc)
+{
+  if (!buf) return;
+
+  /* If command has no space yet, complete command names */
+  if (strchr(buf, ' ') == NULL)
+    {
+      esp_console_get_completion(buf, lc);
+      return;
+    }
+
+  /* Command has a space: complete file path argument */
+  const char *last_space = strrchr(buf, ' ');
+  const char *arg = last_space + 1;
+
+  char prefix_cmd[512];
+  size_t pfx_len = arg - buf;
+  if (pfx_len >= sizeof(prefix_cmd)) return;
+  strncpy(prefix_cmd, buf, pfx_len);
+  prefix_cmd[pfx_len] = '\0';
+
+  char dir_to_open[512];
+  char match_prefix[128] = "";
+
+  const char *last_slash = strrchr(arg, '/');
+  if (last_slash)
+    {
+      char dir_part[512];
+      size_t dlen = last_slash - arg;
+      if (dlen == 0)
+        {
+          strncpy(dir_part, "/", sizeof(dir_part));
+        }
+      else
+        {
+          strncpy(dir_part, arg, dlen);
+          dir_part[dlen] = '\0';
+        }
+      resolve_path(dir_part, dir_to_open, sizeof(dir_to_open));
+      strncpy(match_prefix, last_slash + 1, sizeof(match_prefix) - 1);
+    }
+  else
+    {
+      strncpy(dir_to_open, s_cwd, sizeof(dir_to_open) - 1);
+      strncpy(match_prefix, arg, sizeof(match_prefix) - 1);
+    }
+
+  /* Root '/' is not a physical directory in ESP-IDF VFS; supply mounted filesystems */
+  if (strcmp(dir_to_open, "/") == 0)
+    {
+      const char *mounts[] = { "sdcard", "data" };
+      size_t match_len = strlen(match_prefix);
+      for (size_t m = 0; m < sizeof(mounts) / sizeof(mounts[0]); m++)
+        {
+          if (strncmp(mounts[m], match_prefix, match_len) == 0)
+            {
+              char completion[1536];
+              snprintf(completion, sizeof(completion), "%s/%s/", prefix_cmd, mounts[m]);
+              linenoiseAddCompletion(lc, completion);
+            }
+        }
+      return;
+    }
+
+  DIR *d = opendir(dir_to_open);
+  if (!d) return;
+
+  struct dirent *de;
+  size_t match_len = strlen(match_prefix);
+  while ((de = readdir(d)) != NULL)
+    {
+      if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+      if (strncmp(de->d_name, match_prefix, match_len) == 0)
+        {
+          char completion[1536];
+          char path_prefix[512] = "";
+          if (last_slash)
+            {
+              size_t dlen = last_slash - arg + 1;
+              strncpy(path_prefix, arg, dlen);
+              path_prefix[dlen] = '\0';
+            }
+          snprintf(completion, sizeof(completion), "%s%s%s", prefix_cmd, path_prefix, de->d_name);
+
+          /* Check if directory to append '/' */
+          char full_test[1024];
+          snprintf(full_test, sizeof(full_test), "%s/%s", dir_to_open, de->d_name);
+          struct stat st;
+          if (stat(full_test, &st) == 0 && S_ISDIR(st.st_mode))
+            {
+              strncat(completion, "/", sizeof(completion) - strlen(completion) - 1);
+            }
+
+          linenoiseAddCompletion(lc, completion);
+        }
+    }
+  closedir(d);
+}
+
 static void register_commands(void)
 {
   esp_console_register_help_command();
@@ -871,6 +1122,12 @@ static void register_commands(void)
           .help = "Pulse hardware reset line (GPIO 54) to ESP32-C6",
           .hint = NULL,
           .func = &cmd_reset_c6,
+      },
+      {
+          .command = "top",
+          .help = "Show live FreeRTOS tasks and CPU usage",
+          .hint = NULL,
+          .func = &cmd_top,
       },
       {
           .command = "pwd",
@@ -1086,6 +1343,10 @@ void app_main(void)
 
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
+
+  /* Force enable raw mode for readline, arrow keys, history, and tab completion */
+  linenoiseSetDumbMode(0);
+  linenoiseSetCompletionCallback(&custom_completion);
 
   register_commands();
 
