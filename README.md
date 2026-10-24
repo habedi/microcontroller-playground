@@ -10,6 +10,13 @@
 
 This is a playground for my microcontroller projects and experiments.
 
+### Supported Hardware
+
+| # | Board / MCU                         | Specifications                                                                                                                                                | Local Notes                                              |                                            Image                                             |
+|---|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|:--------------------------------------------------------------------------------------------:|
+| 1 | Raspberry Pi Pico 2 WH (RP2350)     | [Pico 2 Specs](https://www.raspberrypi.com/products/raspberry-pi-pico-2/), [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf) | [docs/raspberrypi-pico-2.md](docs/raspberrypi-pico-2.md) |     <img src="docs/assets/images/pico2wh.png" alt="Raspberry Pi Pico 2 WH" width="120">      |
+| 2 | Waveshare ESP32-P4-WIFI6 (ESP32-P4) | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-P4-WIFI6), [Espressif ESP32-P4 Specs](https://www.espressif.com/en/products/socs/esp32-p4)              | [docs/esp32p4.md](docs/esp32p4.md)                       | <img src="docs/assets/images/esp32-p4-wifi6.png" alt="Waveshare ESP32-P4-WIFI6" width="120"> |
+
 ---
 
 ### Quickstart
