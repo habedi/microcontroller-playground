@@ -1,5 +1,8 @@
 ## WebAssembly Execution on RP2350
 
+The custom NuttX configuration and board patches were removed from the repository.
+The results below describe the previously tested firmware; a fresh checkout cannot reproduce it directly.
+
 This experiment compiles a C program to a standalone WebAssembly module (`main.wasm`), transfers it to the
 Raspberry Pi Pico 2 internal flash storage (`/data`) over the serial console using Zmodem without reflashing,
 and executes it using WAMR (`iwasm`).
@@ -7,18 +10,12 @@ and executes it using WAMR (`iwasm`).
 ### Board and OS
 
 - Board: Raspberry Pi Pico 2 WH (RP2350, Arm Cortex-M33).
-- OS: Apache NuttX (configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-wamr`).
+- OS: Apache NuttX (configuration `usbnsh-wamr`).
 
 ### Build and Flash the Firmware
 
-Inside the Nix dev shell:
-
-```shell
-make nuttx-distclean
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-wamr
-make nuttx-build
-make flash-pico-uf2
-```
+This firmware used the historical `usbnsh-wamr` configuration and custom Pico board patches.
+Restore them from Git history before rebuilding or flashing.
 
 Connect to the NuttShell:
 

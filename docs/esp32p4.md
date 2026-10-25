@@ -1,13 +1,16 @@
 ## ESP32-P4 Notes
 
+The custom configurations and patches described here were removed from the repository.
+Their names below refer to historical experiments; the files remain available in Git history.
+
 Notes on bringing up Apache NuttX on the ESP32-P4 function EV board, with 32 MB of PSRAM, headers, and an
 onboard ESP32-C6 wireless coprocessor.
 
 ### Status
 
 The board runs both stacks. NuttX reaches an interactive NuttShell prompt when the console is on UART0, read
-over the board's onboard CH343 bridge, and ESP-IDF v6.1 runs and prints over the same cable. The saved
-configuration is `configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
+over the board's onboard CH343 bridge, and ESP-IDF v6.1 runs and prints over the same cable. The historical
+configuration was `nsh-rev1`.
 
 Only the USB Serial/JTAG console is broken. The `usbconsole` configuration still stops while attaching the
 console interrupt. The same image with the console on UART0 boots to a prompt. So the fault is in that driver,
@@ -37,12 +40,15 @@ CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
 ```
 
-The stock `usbconsole` configuration plus those two lines is saved at
-`configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1/defconfig`:
+The stock `usbconsole` configuration needs those two options:
 
 ```shell
 make nuttx-distclean
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1
+make nuttx-configure BOARD=esp32p4-function-ev-board:usbconsole
+kconfig-tweak --file external/nuttx/.config \
+  --enable CONFIG_ESP32P4_SELECTS_REV_LESS_V3 \
+  --enable CONFIG_ESP32P4_REV_MIN_100
+make -C external/nuttx olddefconfig
 make nuttx-build
 ```
 
@@ -232,7 +238,11 @@ NuttX 0.0.0 2b5509e4-dirty Jan  1 1980 00:00:00 risc-v esp32p4-function-ev-board
 
 ```shell
 make nuttx-distclean
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1
+make nuttx-configure BOARD=esp32p4-function-ev-board:nsh
+kconfig-tweak --file external/nuttx/.config \
+  --enable CONFIG_ESP32P4_SELECTS_REV_LESS_V3 \
+  --enable CONFIG_ESP32P4_REV_MIN_100
+make -C external/nuttx olddefconfig
 make nuttx-build
 make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
@@ -247,7 +257,7 @@ rather than hardware, since this image is a plain `nsh` with no PSRAM and a smal
 
 ### A Filesystem and Shell Tools
 
-`configs/nuttx/esp32p4-function-ev-board/nsh-tools-rev1` adds littlefs on the internal flash, `vi`, `nxdiag`,
+`nsh-tools-rev1` adds littlefs on the internal flash, `vi`, `nxdiag`,
 tab completion, and command history to `nsh-rev1`. None of it needs a patch, since
 `ESPRESSIF_SPIFLASH_LITTLEFS` and its automatic bring-up are already in the board tree:
 
@@ -281,8 +291,8 @@ harmless. The partition ends at 2 MB, which is what the image header declares, e
 ### PSRAM Under NuttX
 
 NuttX drives the same PSRAM through `CONFIG_ESPRESSIF_SPIRAM`, and it works. The stock `psram_usrheap`
-configuration plus the two revision options is saved as
-`configs/nuttx/esp32p4-function-ev-board/psram-usrheap-rev1`. It also defaults to 200 MHz and runs its own
+configuration plus the two revision options was tested as
+`psram-usrheap-rev1`. It also defaults to 200 MHz and runs its own
 boot-time memory test.
 
 PSRAM becomes the user heap while internal RAM stays as the kernel heap, which `free` reports as two regions:
@@ -305,7 +315,7 @@ and is fixed by running that command once.
 
 ### The Comprehensive Configuration
 
-`configs/nuttx/esp32p4-function-ev-board/nsh-full-rev1` combines the PSRAM heap with the shell tools and every
+`nsh-full-rev1` combines the PSRAM heap with the shell tools and every
 on-chip peripheral that needs no wiring. It is 524316 bytes, which is 47 percent of the space between the
 application start at 0x002000 and the filesystem at 0x110000.
 
@@ -376,7 +386,7 @@ The three-line chip revision warning is the bypassed `PANIC()` announcing itself
 
 ### The Whole 32 MB, and Filesystem Throughput
 
-`configs/nuttx/esp32p4-function-ev-board/nsh-full-32m-rev1` uses the whole flash chip and tunes littlefs for
+`nsh-full-32m-rev1` uses the whole flash chip and tunes littlefs for
 throughput. It differs from `nsh-full-rev1` in six options:
 
 ```
@@ -494,7 +504,7 @@ Enabling that option does not link: `riscv_tls.c` needs `_stdata`, `_etdata`, an
 linker script defines them. 42 board scripts elsewhere in the tree do. Adding `.tdata` and `.tbss` sections to
 `esp32p4_sections.ld` is the remaining work.
 
-Three fixes were needed to link at all, kept in `patches/nuttx-apps/0001-python-cross-build-fixes.patch`. The
+Three fixes were needed to link at all, previously kept in `0001-python-cross-build-fixes.patch` (historical patch). The
 host interpreter was built with the cross compiler, because the port's host rule does not override `CC`.
 `_posixsubprocess` cannot compile without fork, since CPython gates its vfork path on `defined(__linux__)`.
 Thread-local storage needed `-ftls-model=local-exec`, which took 567 `R_RISCV_TLS_GOT_HI20` relocations to zero.

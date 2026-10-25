@@ -65,10 +65,12 @@ Press Enter twice after opening the console to reach the `nsh>` prompt.
 ```shell
 make nuttx-distclean            # Run this whenever you switch boards
 
-# For the Waveshare board (silicon revision v1.3)
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/nsh-rev1
-# For silicon revisions v3.0 and newer, use
-# make nuttx-configure BOARD=esp32p4-function-ev-board:nsh
+make nuttx-configure BOARD=esp32p4-function-ev-board:nsh
+# Required for the Waveshare board (silicon revision v1.3)
+kconfig-tweak --file external/nuttx/.config \
+  --enable CONFIG_ESP32P4_SELECTS_REV_LESS_V3 \
+  --enable CONFIG_ESP32P4_REV_MIN_100
+make -C external/nuttx olddefconfig
 
 make nuttx-build
 make nuttx-flash-esp PORT=/dev/ttyACM0

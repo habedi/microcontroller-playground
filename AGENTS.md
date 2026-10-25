@@ -32,7 +32,7 @@ The boards connect over USB to a Linux development machine (amd64 or arm64):
 - Prefer small, focused changes over large refactoring.
 - Add comments only when they explain something the code does not show.
 - Do not add features, error handling, or abstractions beyond current experiment needs.
-- Never commit changes inside submodules under `external/`. Out-of-tree patches belong in `patches/`. Submodule version bumps belong in their own
+- Never commit changes inside submodules under `external/`. Submodule version bumps belong in their own
   commit.
 - Check the nested Espressif HAL repository at `external/nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty` directly to verify it is clean.
 - Do not flash a board or open its serial port without being asked.
@@ -62,7 +62,6 @@ Python tools are managed by uv via `pyproject.toml` (run with `uv run`). System 
 
 - `external/`: git submodules.
 - `experiments/`: one directory per experiment with a `README.md`.
-- `configs/`: saved build configurations under `configs/<os>/<board>/<name>/`.
 - `docs/`: hardware, wiring, and architectural documentation.
 - `Makefile`: developer tasks (`make help`).
 - Build artifacts remain inside the producing tree under `external/` or `build/` and are never committed.
@@ -105,7 +104,7 @@ Serial console:
 ## Adding a Board or an OS
 
 - New board: add package list in `flake.nix`, entry in Hardware above, and notes in `docs/`.
-- New OS or SDK: add submodule under `external/`, prefixed Makefile targets (`<os>-*`), subdirectory in `configs/`, and packages in `flake.nix`.
+- New OS or SDK: add submodule under `external/`, prefixed Makefile targets (`<os>-*`), and packages in `flake.nix`.
 - OS environment variables belong in `flake.nix` `shellHook`.
 - Experiments name boards and OS in `README.md`, not directory names.
 - Migration away from an OS removes its submodule, target group, configs, and packages without a residue.
@@ -127,7 +126,7 @@ Serial console:
 1. Check existing board notes in `docs/`.
 2. Configure and build the smallest image testing the concept (usually starting from `nsh`).
 3. Flash, verify behavior on hardware, and document findings in `docs/`.
-4. Save reproducible configurations under `configs/`.
+4. Document the base configuration and required options in the experiment README.
 
 Hardware behavior is verified on physical boards. Logic independent of hardware (parsers, protocol framing) must have host-side unit tests under
 `experiments/<name>/test/`.
@@ -144,7 +143,7 @@ Before committing:
 
 This repository is public. Never commit:
 
-- Absolute paths: use `PLAYGROUND_ROOT` (check saved defconfigs).
+- Absolute paths: use `PLAYGROUND_ROOT` (check documented configuration paths).
 - Hardware identifiers: no MAC addresses, eFuse contents, or serial numbers.
 - Wireless survey data: record scan success and count, never SSIDs or BSSIDs.
 - Personal notes or pricing: store in `*.local.md` (gitignored).

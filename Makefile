@@ -11,14 +11,6 @@ UF2       ?= $(NUTTX_DIR)/nuttx.uf2
 PICO_MOUNT ?= $(shell findmnt -rn -o TARGET -S LABEL=RP2350 2>/dev/null || \
   findmnt -rn -o TARGET -S LABEL=RPI-RP2 2>/dev/null)
 
-# Saved NuttX defconfig path under configs/nuttx/<board>/<name>.
-SAVED_CONFIG   ?=
-SAVED_BOARD     = $(notdir $(patsubst %/,%,$(dir $(SAVED_CONFIG))))
-NUTTX_APPS_DIR ?= ../nuttx-apps
-
-# Submodule patch mappings: <submodule directory>:<patch directory>.
-PATCH_SETS = $(NUTTX_DIR):patches/nuttx external/nuttx-apps:patches/nuttx-apps
-
 # Pico SDK project configuration.
 PICOSDK_DIR    ?= external/pico-sdk
 PICOSDK_BOARD  ?= pico2_w
@@ -136,63 +128,6 @@ setup-hooks: ## Install Git hooks (pre-commit and pre-push)
 test-hooks: ## Run the Git hooks on all files
 	uv run pre-commit run --all-files --hook-stage pre-push
 
-# Apply stacked patches under patches/ to submodules.
-.PHONY: nuttx-patch
-nuttx-patch: ## Apply the patches under patches/ to the NuttX submodules
-	@for set in $(PATCH_SETS); do \
-		dir=$${set%%:*}; pdir=$${set#*:}; \
-		test -d "$$pdir" || continue; \
-		for p in $$pdir/*.patch; do \
-			test -f "$$p" || continue; \
-			if git -C $$dir apply --check "$(CURDIR)/$$p" 2>/dev/null; then \
-				git -C $$dir apply "$(CURDIR)/$$p" && echo "applied $$p"; \
-			elif git -C $$dir apply --reverse --check "$(CURDIR)/$$p" \
-			     2>/dev/null; then \
-				echo "already applied $$p"; \
-			else \
-				touched=1; \
-				for f in $$(sed -n 's|^+++ b/||p' "$$p"); do \
-					if git -C $$dir ls-files --error-unmatch "$$f" \
-					     >/dev/null 2>&1; then \
-						git -C $$dir diff --quiet -- "$$f" && touched=0; \
-					else \
-						test -f $$dir/$$f || touched=0; \
-					fi; \
-				done; \
-				if [ $$touched = 1 ]; then \
-					echo "already applied $$p (under a later patch)"; \
-				else \
-					echo "ERROR: $$p does not apply cleanly to $$dir"; \
-					echo "Run make nuttx-repatch to reset the patch state."; \
-					exit 1; \
-				fi; \
-			fi; \
-		done; \
-	done
-
-# Revert patches in reverse order.
-.PHONY: nuttx-unpatch
-nuttx-unpatch: ## Remove the patches under patches/ from the NuttX submodules
-	@for set in $(PATCH_SETS); do \
-		dir=$${set%%:*}; pdir=$${set#*:}; \
-		test -d "$$pdir" || continue; \
-		for p in $$(ls -r $$pdir/*.patch 2>/dev/null); do \
-			test -f "$$p" || continue; \
-			git -C $$dir apply --reverse "$(CURDIR)/$$p" 2>/dev/null && \
-				echo "reverted $$p" || echo "not applied $$p"; \
-			for f in $$(sed -n 's|^+++ b/||p' "$$p"); do \
-				git -C $$dir ls-files --error-unmatch "$$f" \
-					>/dev/null 2>&1 \
-					|| { test -f $$dir/$$f && rm -f $$dir/$$f && \
-						echo "  removed untracked $$f"; }; \
-			done; \
-		done; \
-	done
-
-# Reset patches and clear untracked files left by reverted patches.
-.PHONY: nuttx-repatch
-nuttx-repatch: nuttx-unpatch nuttx-patch ## Reset the patches to a consistent state
-
 .PHONY: cyw43-firmware
 cyw43-firmware: ## Generate the CYW43439 firmware blob the wireless build needs
 	uv run python tools/cyw43-firmware.py
@@ -218,29 +153,8 @@ nuttx-list-boards: ## List the available NuttX boards and configurations
 	cd $(NUTTX_DIR) && ./tools/configure.sh -L
 
 .PHONY: nuttx-configure
-nuttx-configure: nuttx-patch ## Configure NuttX for BOARD (default: esp32p4-function-ev-board:nsh)
+nuttx-configure: ## Configure NuttX for BOARD (default: esp32p4-function-ev-board:nsh)
 	cd $(NUTTX_DIR) && ./tools/configure.sh $(BOARD)
-
-.PHONY: nuttx-configure-saved
-nuttx-configure-saved: nuttx-patch ## Configure NuttX from SAVED_CONFIG (a directory under configs/nuttx)
-	@test -f "$(SAVED_CONFIG)/defconfig" || { \
-		echo "Set SAVED_CONFIG to a directory that holds a defconfig, for example"; \
-		echo "make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/esp32p4-function-ev-board/usbconsole-rev1"; \
-		exit 1; }
-	cd $(NUTTX_DIR) && ./tools/configure.sh -E $(SAVED_BOARD):nsh
-	cp $(SAVED_CONFIG)/defconfig $(NUTTX_DIR)/.config
-	kconfig-tweak --file $(NUTTX_DIR)/.config \
-		--set-str CONFIG_APPS_DIR "$(NUTTX_APPS_DIR)"
-	$(MAKE) -C $(NUTTX_DIR) olddefconfig
-
-.PHONY: nuttx-save-config
-nuttx-save-config: ## Save the current NuttX configuration into SAVED_CONFIG
-	@test -n "$(SAVED_CONFIG)" || { \
-		echo "Set SAVED_CONFIG to the directory to write the defconfig into."; \
-		exit 1; }
-	$(MAKE) -C $(NUTTX_DIR) savedefconfig
-	mkdir -p $(SAVED_CONFIG)
-	mv $(NUTTX_DIR)/defconfig $(SAVED_CONFIG)/defconfig
 
 .PHONY: nuttx-menuconfig
 nuttx-menuconfig: ## Adjust the current NuttX configuration
@@ -256,9 +170,9 @@ nuttx-check-toolchain:
 	  2>/dev/null || exit 0; \
 	grep -q '^CONFIG_RP23XX_INFINEON_CYW43439=y' $(NUTTX_DIR)/.config || { \
 		echo "This configuration asks for the CYW43439, but the board symbol"; \
-		echo "is absent, so the patches under patches/nuttx are not applied."; \
+		echo "is absent from the configured board support."; \
 		echo "Kconfig drops the symbol without a word and the image would"; \
-		echo "build without wlan0. Run make nuttx-patch, then configure again."; \
+		echo "build without wlan0. Add board support, then configure again."; \
 		exit 1; }; \
 	fw=$$(sed -n 's/^CONFIG_CYW43439_FIRMWARE_BIN_PATH="\(.*\)"$$/\1/p' \
 	  $(NUTTX_DIR)/.config); \
