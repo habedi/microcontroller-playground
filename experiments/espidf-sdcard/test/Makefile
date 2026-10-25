@@ -14,7 +14,7 @@ SRC      = ../main
 test: $(BUILD)/test_path_util $(BUILD)/test_editor
 	$(BUILD)/test_path_util
 	$(BUILD)/test_editor
-	CC="$(CC)" CFLAGS="$(CFLAGS)" SANFLAGS="$(SANFLAGS)" LDFLAGS="$(LDFLAGS)" $(PYTHON) -m unittest -v test_wifi.py
+	CC="$(CC)" CFLAGS="$(CFLAGS)" SANFLAGS="$(SANFLAGS)" LDFLAGS="$(LDFLAGS)" $(PYTHON) -m unittest -v test_wifi.py test_autocomplete.py
 
 $(BUILD)/test_path_util: test_path_util.c $(SRC)/path_util.c $(SRC)/path_util.h | $(BUILD)
 	$(CC) $(CFLAGS) $(SANFLAGS) -o $@ test_path_util.c $(SRC)/path_util.c $(LDFLAGS)

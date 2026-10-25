@@ -18,6 +18,8 @@ ESP-IDF experiment providing an interactive NSH-compatible command shell on the 
 
 The firmware runs `esp_console` on UART0 with prompt `nsh> `.
 Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
+Path completion accepts quoted or escaped spaces and escapes suggested filenames for the command parser.
+Suggestions that exceed the console line limit are omitted.
 
 - `help`: list available commands
 - `pwd`: print current working directory
@@ -67,3 +69,6 @@ They check path resolution, status rendering with long filenames, and loading lo
 Carriage returns inside a line, and at the end of a file without a newline is preserved.
 These fixes passed host tests; they have not been verified on the board.
 The Wi-Fi credential fixes also passed an ESP32-P4 firmware build in the Nix dev shell.
+Autocomplete tests use the parser and line editor from the `external/esp-idf` submodule.
+They cover quoted paths, escaped filenames, long prefixes, and accepting a completion followed by Backspace.
+The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.

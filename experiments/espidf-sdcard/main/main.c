@@ -63,6 +63,7 @@
 
 #define SDCARD_MOUNT_POINT "/sdcard"
 #define LITTLEFS_MOUNT_POINT "/data"
+#define SHELL_MAX_CMDLINE 256
 
 static const char *TAG = "espidf_shell";
 
@@ -1594,65 +1595,100 @@ ssize_t __wrap_write(int fd, const void *buf, size_t count)
   return __real_write(fd, buf, count);
 }
 
+static void add_path_completion(const char *buf, size_t prefix_len,
+                                const char *path, linenoiseCompletions *lc)
+{
+  /* linenoise reserves one byte, then uses that reduced size for snprintf. */
+  char completion[SHELL_MAX_CMDLINE - 1];
+  if (prefix_len >= sizeof(completion)) return;
+  memcpy(completion, buf, prefix_len);
+  size_t len = prefix_len;
+
+  for (const char *p = path; *p; p++)
+    {
+      bool escape = *p == ' ' || *p == '\\' || *p == '"';
+      if (len + (escape ? 2 : 1) >= sizeof(completion)) return;
+      if (escape) completion[len++] = '\\';
+      completion[len++] = *p;
+    }
+  completion[len] = '\0';
+  linenoiseAddCompletion(lc, completion);
+}
+
 static void custom_completion(const char *buf, linenoiseCompletions *lc)
 {
-  if (!buf) return;
+  if (!buf || strlen(buf) >= SHELL_MAX_CMDLINE) return;
 
-  /* If command has no space yet, complete command names */
-  if (strchr(buf, ' ') == NULL)
+  const char *arg = buf;
+  bool in_arg = false, quoted = false, escaped = false;
+  size_t completed = 0;
+  for (const char *p = buf; *p; p++)
+    {
+      if (escaped)
+        {
+          escaped = false;
+          continue;
+        }
+      if (!in_arg)
+        {
+          arg = p;
+          if (*p == ' ')
+            {
+              arg = p + 1;
+              continue;
+            }
+          in_arg = true;
+          quoted = *p == '"';
+          if (quoted) continue;
+        }
+      if (*p == '\\') escaped = true;
+      else if ((quoted && *p == '"') || (!quoted && *p == ' '))
+        {
+          in_arg = false;
+          quoted = false;
+          completed++;
+          if (*p == ' ') arg = p + 1;
+        }
+    }
+
+  if (completed == 0)
     {
       esp_console_get_completion(buf, lc);
       return;
     }
 
-  /* Command has a space: complete file path argument */
-  const char *last_space = strrchr(buf, ' ');
-  const char *arg = last_space + 1;
-
-  char prefix_cmd[512];
-  size_t pfx_len = arg - buf;
-  if (pfx_len >= sizeof(prefix_cmd)) return;
-  strncpy(prefix_cmd, buf, pfx_len);
-  prefix_cmd[pfx_len] = '\0';
+  char path[SHELL_MAX_CMDLINE];
+  strcpy(path, arg);
+  char *args[2];
+  esp_console_split_argv(path, args, 2);
 
   char dir_to_open[512];
-  char match_prefix[128] = "";
-
-  const char *last_slash = strrchr(arg, '/');
+  char *last_slash = strrchr(path, '/');
+  const char *match_prefix = last_slash ? last_slash + 1 : path;
   if (last_slash)
     {
-      char dir_part[512];
-      size_t dlen = last_slash - arg;
-      if (dlen == 0)
-        {
-          strncpy(dir_part, "/", sizeof(dir_part));
-        }
-      else
-        {
-          strncpy(dir_part, arg, dlen);
-          dir_part[dlen] = '\0';
-        }
-      if (!resolve_path(dir_part, dir_to_open, sizeof(dir_to_open))) return;
-      strncpy(match_prefix, last_slash + 1, sizeof(match_prefix) - 1);
+      *last_slash = '\0';
+      bool ok = resolve_path(last_slash == path ? "/" : path,
+                             dir_to_open, sizeof(dir_to_open));
+      *last_slash = '/';
+      if (!ok) return;
     }
   else
     {
-      strncpy(dir_to_open, s_cwd, sizeof(dir_to_open) - 1);
-      strncpy(match_prefix, arg, sizeof(match_prefix) - 1);
+      strcpy(dir_to_open, s_cwd);
     }
 
-  /* Root '/' is not a physical directory in ESP-IDF VFS; supply mounted filesystems */
+  /* ESP-IDF VFS has no physical root directory to enumerate. */
   if (strcmp(dir_to_open, "/") == 0)
     {
       const char *mounts[] = { "sdcard", "data" };
-      size_t match_len = strlen(match_prefix);
       for (size_t m = 0; m < sizeof(mounts) / sizeof(mounts[0]); m++)
         {
-          if (strncmp(mounts[m], match_prefix, match_len) == 0)
+          if (strncmp(mounts[m], match_prefix, strlen(match_prefix)) == 0)
             {
-              char completion[1536];
-              snprintf(completion, sizeof(completion), "%s/%s/", prefix_cmd, mounts[m]);
-              linenoiseAddCompletion(lc, completion);
+              char candidate[16];
+              snprintf(candidate, sizeof(candidate), "/%s/", mounts[m]);
+              add_path_completion(buf, arg - buf, candidate, lc);
             }
         }
       return;
@@ -1668,26 +1704,18 @@ static void custom_completion(const char *buf, linenoiseCompletions *lc)
       if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
       if (strncmp(de->d_name, match_prefix, match_len) == 0)
         {
-          char completion[1536];
-          char path_prefix[512] = "";
-          if (last_slash)
-            {
-              size_t dlen = last_slash - arg + 1;
-              strncpy(path_prefix, arg, dlen);
-              path_prefix[dlen] = '\0';
-            }
-          snprintf(completion, sizeof(completion), "%s%s%s", prefix_cmd, path_prefix, de->d_name);
-
-          /* Check if directory to append '/' */
           char full_test[1024];
           snprintf(full_test, sizeof(full_test), "%s/%s", dir_to_open, de->d_name);
           struct stat st;
-          if (stat(full_test, &st) == 0 && S_ISDIR(st.st_mode))
+          bool directory = stat(full_test, &st) == 0 && S_ISDIR(st.st_mode);
+          char candidate[512];
+          int len = snprintf(candidate, sizeof(candidate), "%.*s%s%s",
+                             last_slash ? (int)(last_slash - path + 1) : 0,
+                             path, de->d_name, directory ? "/" : "");
+          if (len >= 0 && (size_t)len < sizeof(candidate))
             {
-              strncat(completion, "/", sizeof(completion) - strlen(completion) - 1);
+              add_path_completion(buf, arg - buf, candidate, lc);
             }
-
-          linenoiseAddCompletion(lc, completion);
         }
     }
   closedir(d);
@@ -1955,8 +1983,8 @@ void app_main(void)
   esp_console_repl_t *repl = NULL;
   esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
   repl_config.prompt = "nsh> ";
-  repl_config.max_cmdline_length = 256;
-  /* Tab completion alone keeps about 5 KB of path buffers on this stack. */
+  repl_config.max_cmdline_length = SHELL_MAX_CMDLINE;
+  /* Leave room for filesystem completion and command handlers. */
   repl_config.task_stack_size = 16384;
 
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
