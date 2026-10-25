@@ -17,7 +17,8 @@ Priorities, in order:
 The boards connect over USB to a Linux development machine (amd64 or arm64):
 
 - Waveshare ESP32-P4-WIFI6: ESP32-P4NRW32 (dual-core RISC-V, 32 MB PSRAM, 32 MB flash) with an onboard ESP32-C6 over SDIO (functional after
-  flashing native SDIO slave firmware; see `docs/esp32p4.md`). Silicon revision v1.3 requires `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and `CONFIG_ESP32P4_REV_MIN_100`. USB-C links to a WCH CH343
+  flashing native SDIO slave firmware; see `docs/esp32p4.md`). Silicon revision v1.3 requires `CONFIG_ESP32P4_SELECTS_REV_LESS_V3` and
+  `CONFIG_ESP32P4_REV_MIN_100`. USB-C links to a WCH CH343
   UART0 bridge (`/dev/ttyACM0`, vendor `1a86`). NuttX board target is `esp32p4-function-ev-board`.
 - Raspberry Pi Pico 2 WH: RP2350 (Arm Cortex-M33 and RISC-V Hazard3 cores) with CYW43439 wireless. NuttX targets Cortex-M33 using board
   `raspberrypi-pico-2`. The `usbnsh` configuration provides console over USB. See `docs/raspberrypi-pico-2.md`.
