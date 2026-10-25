@@ -42,6 +42,7 @@ Suggestions that exceed the console line limit are omitted.
 - `ping <host>`: send ICMP echo requests to network host
 - `retawq <url>`: launch the retawq text web browser (or `retawq --dump=<url>`)
 - `browse <url>`: alias for `retawq` web browser
+- `wget -O <file|-> <url>`: download an HTTP or HTTPS URL to a file, or print its body with `-O -`
 - `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
 - `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
@@ -71,6 +72,23 @@ The firmware starts SNTP through `pool.ntp.org` after Wi-Fi gets an IP address.
 If the clock is still unset, the browser command waits up to 15 seconds for synchronization.
 It returns an error if synchronization fails; certificate checks stay enabled.
 
+### File Downloads
+
+The `wget` command uses ESP-IDF's HTTP client, follows redirects, and verifies HTTPS certificates.
+The `-O` output argument and an explicit HTTP or HTTPS URL are required.
+Relative output paths use the shell's current directory.
+
+```text
+wget -O /data/example.html https://example.com
+wget -O - https://example.com
+```
+
+Downloads stream to a temporary file and are published only after the response is complete.
+Network errors, HTTP error responses, and write failures leave an existing destination unchanged.
+On the SD card, use a new output filename or remove the old file first: FATFS does not replace files during rename.
+Console output streams directly and can contain a partial response if the request fails.
+This command implements only the `-O` download form.
+
 ### Build and Flash
 
 ```shell
@@ -91,6 +109,8 @@ The Wi-Fi credential fixes also passed an ESP32-P4 firmware build in the Nix dev
 Autocomplete tests use the parser and line editor from the `external/esp-idf` submodule.
 They cover quoted paths, escaped filenames, long prefixes, and accepting a completion followed by Backspace.
 The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.
+Download tests cover binary bodies, redirects, incomplete transfers, HTTP errors, and output failures.
+The `wget` host tests and ESP32-P4 firmware build passed; the new command has not been flashed or verified on hardware.
 
 Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
 This target uses uv's `test` dependency group for mbedTLS's Python code generators.

@@ -25,6 +25,7 @@
 #include "editor.h"
 #include "path_util.h"
 #include "retawq.h"
+#include "wget.h"
 #include "esp_app_format.h"
 #include "esp_chip_info.h"
 #include "esp_clk_tree.h"
@@ -761,6 +762,34 @@ static int cmd_cpuinfo(int argc, char **argv)
   return 0;
 }
 
+static bool sync_network_time(void)
+{
+  if (s_wifi_connected && time(NULL) < 1704067200) /* January 2024 */
+    {
+      printf("Synchronizing the clock for HTTPS certificate checks...\n");
+      if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) != ESP_OK)
+        {
+          printf("Time synchronization failed. Check the network and try again.\n");
+          return false;
+        }
+    }
+  return true;
+}
+
+static int cmd_wget(int argc, char **argv)
+{
+  if (argc != 4 || strcmp(argv[1], "-O") != 0)
+    {
+      printf("Usage: wget -O <file|-> <http(s)://url>\n");
+      return 1;
+    }
+  char path[512];
+  if (strcmp(argv[2], "-") == 0) strcpy(path, "-");
+  else if (!resolve_arg("wget", argv[2], path, sizeof(path))) return 1;
+  if (!sync_network_time()) return 1;
+  return wget_download(argv[3], path);
+}
+
 static int cmd_retawq(int argc, char **argv)
 {
   if (argc < 2)
@@ -771,15 +800,7 @@ static int cmd_retawq(int argc, char **argv)
       return 1;
     }
 
-  if (s_wifi_connected && time(NULL) < 1704067200) /* January 2024 */
-    {
-      printf("Synchronizing the clock for HTTPS certificate checks...\n");
-      if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) != ESP_OK)
-        {
-          printf("Time synchronization failed. Check the network and try again.\n");
-          return 1;
-        }
-    }
+  if (!sync_network_time()) return 1;
 
   const char *norm_argv[argc + 1];
   char url_buf[256];
@@ -1913,6 +1934,12 @@ static void register_commands(void)
           .help = "Launch retawq text web browser (retawq <url> or retawq --dump=<url>)",
           .hint = "<url>",
           .func = &cmd_retawq,
+      },
+      {
+          .command = "wget",
+          .help = "Download an HTTP or HTTPS URL to a file or standard output",
+          .hint = "-O <file|-> <url>",
+          .func = &cmd_wget,
       },
       {
           .command = "browse",
