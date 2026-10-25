@@ -1,5 +1,8 @@
 ## Raspberry Pi Pico 2 Notes
 
+The custom configurations and patches described here were removed from the repository.
+These are historical hardware findings. Restore the files from Git history to reproduce the custom setups.
+
 Apache NuttX on the Raspberry Pi Pico 2 WH, an RP2350 board with headers and a wireless module.
 
 ### Status
@@ -61,34 +64,28 @@ Two ways to flash once the board is in BOOTSEL:
   `make setup-udev` installs once, and without them it fails with `Maybe try 'sudo' or check your
   permissions`.
 
-### Saved Configurations
+### Historical Configurations
 
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-tools/defconfig` is the stock `usbnsh` configuration plus
+- `usbnsh-tools` is the stock `usbnsh` configuration plus
   `CONFIG_SYSTEM_VI` and `CONFIG_SYSTEM_NXDIAG`, which add `vi` and `nxdiag` as builtin applications. The two
   apps cost about 17.6 KB of flash and no RAM at all, since `data` and `bss` are unchanged.
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-littlefs/defconfig` is `usbnsh-tools` plus `CONFIG_MTD`,
+- `usbnsh-littlefs` is `usbnsh-tools` plus `CONFIG_MTD`,
   `CONFIG_RP23XX_FLASH_MTD`, and `CONFIG_FS_LITTLEFS` for persistent storage on the internal flash, and
   `CONFIG_READLINE_TABCOMPLETION` and `CONFIG_READLINE_EDIT_EMACS` for shell editing.
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-wifi/defconfig` is `usbnsh-littlefs` plus the CYW43439 driver, the
+- `usbnsh-wifi` is `usbnsh-littlefs` plus the CYW43439 driver, the
   network stack, and the `wapi`, `ping`, and `renew` tools. It needs the patch and the firmware described
   under Wireless below.
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13/defconfig` is `usbnsh-tools` plus the ST7789 driver, the
+- `usbnsh-lcd13` is `usbnsh-tools` plus the ST7789 driver, the
   framebuffer, and `lcddev`, for the 1.3 inch 240x240 display. It needs the patch described under Two Things
   the Tree Was Missing below.
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi/defconfig` combines the two, and adds `CONFIG_FS_TMPFS`
+- `usbnsh-lcd-wifi` combines the two, and adds `CONFIG_FS_TMPFS`
   and `CONFIG_ETC_ROMFS` so `/data` and `/tmp` are mounted before the shell starts. It gives the littlefs
   region the rest of the flash, 3 MB rather than 1 MB. `CONFIG_ARCH_LEDS` has to stay off, because the
   CYW43439 patch compiles out the LED sources that `board_autoled_on` lives in.
-- `configs/nuttx/raspberrypi-pico-2/usbnsh-wamr/defconfig` is `usbnsh-littlefs` plus WAMR (`iwasm`), Zmodem
+- `usbnsh-wamr` is `usbnsh-littlefs` plus WAMR (`iwasm`), Zmodem
   file transfer (`rz`), `CONFIG_ELF`, and `CONFIG_ETC_ROMFS` so the 3 MB `/data` volume is mounted at boot.
 
-Rebuild any of them with:
-
-```shell
-make nuttx-distclean
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-tools
-make nuttx-build
-```
+These custom configurations are available in Git history.
 
 Two clean builds of the same configuration are not byte-identical. The `text` size can differ by a few dozen
 bytes with `data` and `bss` unchanged, which reflects link ordering rather than a difference in content.
@@ -152,7 +149,7 @@ would collide with it, and the driver refuses to initialize in that case rather 
 `CONFIG_ETC_ROMFS` and `CONFIG_FS_ROMFS` build the board's `src/etc` directory into a small ROMFS image,
 mount it at `/etc`, and run `etc/init.d/rcS` before the shell starts. The board ships both `rcS` and
 `rc.sysinit` with nothing in them but a license header, so the mounts go in `rcS`, which
-`patches/nuttx/0003-rp23xx-rcS-mount-storage.patch` does:
+`0003-rp23xx-rcS-mount-storage.patch` (historical patch) does:
 
 ```
 mount -t tmpfs /tmp
@@ -224,11 +221,10 @@ at `arch/arm/src/rp23xx/rp23xx_cyw43439.c`.
 
 Three pieces are needed, none of which upstream provides for this board:
 
-1. `patches/nuttx/0001-raspberrypi-pico-2-cyw43439-wireless.patch` adds the four `GPIO_CYW43439_*` pins, the
+1. `0001-raspberrypi-pico-2-cyw43439-wireless.patch` (historical patch) adds the four `GPIO_CYW43439_*` pins, the
    `rp23xx_cyw_setup()` call in `rp23xx_bringup.c`, `include/rp23xx_extra_gpio.h`, and the firmware staging
    rules. The pins are 23 for power, 24 for data, 25 for chip select, and 29 for the clock, the same as every
-   Pico W. `nuttx-configure` and `nuttx-configure-saved` apply it, so it is hard to forget. `make nuttx-patch`
-   applies it on its own and is idempotent, and `make nuttx-unpatch` removes it.
+   Pico W. This board support must be restored before building wireless firmware.
 2. The firmware blob. `make cyw43-firmware` converts the C array in
    `external/pico-sdk/lib/cyw43-driver/firmware/w43439A0_7_95_49_00_combined.h` into the 225240 byte binary
    NuttX expects, at `build/cyw43439-firmware.bin`. The configuration finds it through `PLAYGROUND_ROOT`,
@@ -263,12 +259,8 @@ the radio never works:
 A Waveshare Pico-LCD-1.3, an ST7789 panel with a joystick and four buttons, works over SPI1.
 It seats onto all 40 pins, so nothing needs wiring.
 
-```shell
-make nuttx-distclean
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-lcd13
-make nuttx-build
-make flash-pico-uf2 UF2=external/nuttx/nuttx.uf2
-```
+This setup used the historical `usbnsh-lcd13` configuration and the ST7789 board patch.
+Restore both from Git history before rebuilding.
 
 The image is 348672 bytes. It registers `/dev/fb0` and `/dev/lcd0`, and the `fb` example draws nested coloured
 rectangles on the panel:
@@ -288,7 +280,7 @@ Test finished
 ### Two Things the Tree Was Missing
 
 NuttX has the chip-independent `st7789.c` driver, but the rp23xx board support could not reach it. Both gaps are
-fixed by `patches/nuttx/0002-rp23xx-st7789-lcd.patch`.
+fixed by `0002-rp23xx-st7789-lcd.patch` (historical patch).
 
 `common/src/rp23xx_st7789.c` did not exist, although both `Make.defs` and `CMakeLists.txt` already listed it
 under `CONFIG_LCD_ST7789`. The new file follows `rp23xx_st7735.c`, which is the same pattern already native to
@@ -323,7 +315,7 @@ The panel carries a five way joystick and four keys. They are plain GPIO pads th
 needs its pull-up on and a pressed control reads low. The board configured the pads with no pull-up at all, which
 left an unpressed input floating and reading as noise, so the patch turns them on.
 
-`patches/nuttx/0006-raspberrypi-pico-2-lcd13-buttons.patch` declares the nine controls, fixes the pull-ups, and
+`0006-raspberrypi-pico-2-lcd13-buttons.patch` (historical patch) declares the nine controls, fixes the pull-ups, and
 has the board select `ARCH_HAVE_BUTTONS` and `ARCH_HAVE_IRQBUTTONS`. Without those two selects `CONFIG_ARCH_BUTTONS`
 cannot be set at all, since it depends on them. The patch also adds the `nuttx/input/buttons.h` include that
 `rp23xx_bringup.c` was missing: it called `btn_lower_initialize()` without it, which failed the build the first

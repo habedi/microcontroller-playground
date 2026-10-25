@@ -1,12 +1,15 @@
 ## Face on the Pico 2 Display
 
+The custom NuttX configuration and board patches were removed from the repository.
+The results below describe the previously tested firmware; a fresh checkout cannot reproduce it directly.
+
 An expressive face on the 1.3 inch 240x240 panel, driven by whatever Claude
 Code is doing. The point is a status display you read at a glance instead of
 switching windows: the eyes narrow while a tool runs, the face looks down while
 files change, and it looks up and pulses when it is waiting on you.
 
 Board: Raspberry Pi Pico 2 WH with the Waveshare 1.3-inch LCD hat.
-OS: Apache NuttX, configuration `configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi`.
+OS: Apache NuttX, configuration `usbnsh-lcd-wifi`.
 
 ### Status
 
@@ -151,15 +154,11 @@ restored revision on the panel.
 
 The application lives here rather than in `external/nuttx-apps`, and NuttX
 reaches it through the `apps/external` symlink that nuttx-apps documents and
-covers in its own `.gitignore`:
+covers in its own `.gitignore`.
+Use `make nuttx-link-app EXTERNAL_APP=experiments/pico-face` to create the symlink.
 
-```shell
-make nuttx-distclean
-make nuttx-link-app EXTERNAL_APP=experiments/pico-face
-make nuttx-configure-saved SAVED_CONFIG=configs/nuttx/raspberrypi-pico-2/usbnsh-lcd-wifi
-make nuttx-build
-make flash-pico-uf2
-```
+This firmware used the historical `usbnsh-lcd-wifi` configuration and custom Pico board patches.
+Restore them from Git history before rebuilding or flashing.
 
 The flash needs the BOOTSEL button held while the board is plugged in.
 

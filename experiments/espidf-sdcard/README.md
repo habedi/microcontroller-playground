@@ -1,22 +1,31 @@
 ## ESP-IDF Workstation Shell
 
-ESP-IDF experiment providing an interactive NSH-compatible command shell on the Waveshare ESP32-P4-WIFI6 with dual filesystem storage (FATFS and LittleFS), wireless networking over SDIO, and an in-terminal text editor.
+ESP-IDF experiment providing an interactive NSH-compatible command shell with filesystem storage, wireless networking, and an in-terminal text editor across both the ESP32-P4 and the ESP32-S3.
 
-- Board: Waveshare ESP32-P4-WIFI6, chip revision v1.3
+- Boards: Waveshare ESP32-P4-WIFI6 (chip revision v1.3), Waveshare ESP32-S3-Zero
 - OS: FreeRTOS, through ESP-IDF v6.1
-- Storage: 128 GB MicroSD card mounted at `/sdcard` (FATFS), plus 12 MB internal flash mounted at `/data` (LittleFS)
-- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO Slot 1
-- Console: interactive REPL with `nsh> ` prompt on UART0
+- Storage: 128 GB MicroSD card at `/sdcard` (FATFS) and 12 MB LittleFS at `/data` on ESP32-P4; 2.375 MB LittleFS at `/data` on ESP32-S3
+- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO on ESP32-P4; native on-chip 2.4 GHz Wi-Fi on ESP32-S3
+- Console: interactive REPL with `nsh> ` prompt on UART0 (ESP32-P4) or USB Serial/JTAG (ESP32-S3)
 
 ### Hardware Configuration
+
+ESP32-P4:
 
 - MicroSD slot: Host Slot 0 with CLK on GPIO 43, CMD on GPIO 44, D0 through D3 on GPIO 39 through 42, active-low power switch on GPIO 45, and LDO channel 4 pad power.
 - Internal storage: 12 MB LittleFS partition on onboard NOR flash at offset `0x400000`.
 - Wireless coprocessor: onboard ESP32-C6 on SDIO Host Slot 1 (CLK on GPIO 18, CMD on GPIO 19, D0 through D3 on GPIO 14 through 17, and reset on GPIO 54).
+- Console: external CH343 UART0 bridge.
+
+ESP32-S3 (Waveshare ESP32-S3-Zero):
+
+- Internal storage: 2.375 MB LittleFS partition on onboard 8 MB NOR flash at offset `0x5a0000`.
+- Wireless: native on-chip 2.4 GHz 802.11 b/g/n radio.
+- Console: internal USB Serial/JTAG controller routed directly to the USB-C port.
 
 ### Interactive Commands
 
-The firmware runs `esp_console` on UART0 with prompt `nsh> `.
+The firmware runs `esp_console` (UART0 on ESP32-P4, USB Serial/JTAG on ESP32-S3) with prompt `nsh> `.
 Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
 Path completion accepts quoted or escaped spaces and escapes suggested filenames for the command parser.
 Suggestions that exceed the console line limit are omitted.
@@ -53,7 +62,7 @@ Suggestions that exceed the console line limit are omitted.
 - `ota_rollback`: roll back to the previous firmware slot and reboot
 - `ota_update <file>`: flash firmware binary from storage to alternate OTA slot
 - `reboot`: restart the board
-- `reset_c6`: pulse hardware reset to the ESP32-C6 coprocessor
+- `reset_c6`: pulse hardware reset to the ESP32-C6 coprocessor (ESP32-P4 only)
 
 ### HTTPS
 
@@ -91,9 +100,18 @@ This command implements only the `-O` download form.
 
 ### Build and Flash
 
+Build for ESP32-P4 (default):
+
 ```shell
-make espidf-build ESPIDF_SRC=experiments/espidf-sdcard
-make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard
+make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32p4
+make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32p4 ESPIDF_PORT=/dev/ttyACM0
+```
+
+Build for ESP32-S3:
+
+```shell
+make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3
+make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3 ESPIDF_PORT=/dev/ttyACM0
 ```
 
 Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
