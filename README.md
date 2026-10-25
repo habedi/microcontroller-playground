@@ -22,7 +22,7 @@ This is a playground for my microcontroller projects and experiments.
 
 ### Quickstart
 
-For the steps below to work, you only need to have Git, Nix, and GNU Make installed on your system.
+For the steps below to work, you need to have Git, Nix, and GNU Make installed on your system.
 
 #### 1. Clone the repository
 
