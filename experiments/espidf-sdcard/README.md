@@ -42,6 +42,7 @@ Readline support provides command history with Up/Down arrows, in-line editing w
 - `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
 - `uname`: display operating system, chip revision, and core count
+- `cpuinfo`: display CPU architecture, clock frequencies, caches, and hardware features
 - `ota_status`: display active partition slot, firmware version, and rollback state
 - `ota_confirm`: confirm new firmware as valid and cancel rollback
 - `ota_rollback`: roll back to the previous firmware slot and reboot
@@ -65,3 +66,4 @@ The tests use address and undefined-behavior sanitizers.
 They check path resolution, status rendering with long filenames, and loading long lines with LF or CRLF endings.
 Carriage returns inside a line, and at the end of a file without a newline is preserved.
 These fixes passed host tests; they have not been verified on the board.
+The Wi-Fi credential fixes also passed an ESP32-P4 firmware build in the Nix dev shell.

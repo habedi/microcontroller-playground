@@ -25,6 +25,8 @@
 #include "path_util.h"
 #include "esp_app_format.h"
 #include "esp_chip_info.h"
+#include "esp_clk_tree.h"
+#include "esp_cpu.h"
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_event.h"
@@ -722,6 +724,36 @@ static int cmd_free(int argc, char **argv)
       printf("  PSRAM Physical:   Disabled / Not initialized\n");
     }
 
+  return 0;
+}
+
+static int cmd_cpuinfo(int argc, char **argv)
+{
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+
+  uint32_t cpu_freq_hz = 0;
+  uint32_t apb_freq_hz = 0;
+  uint32_t xtal_freq_hz = 0;
+
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &cpu_freq_hz);
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &apb_freq_hz);
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &xtal_freq_hz);
+
+  printf("CPU Architecture:      RISC-V 32-bit (RV32IMAFCP + Espressif PIE)\n");
+  printf("Target Chip:           ESP32-P4 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
+  printf("High-Performance Core: %d cores (Active Core ID: %d)\n", chip_info.cores, esp_cpu_get_core_id());
+  printf("Low-Power Core:        1 core (RV32IMC @ up to 40 MHz)\n");
+  printf("CPU Clock Frequency:   %lu MHz (XTAL: %lu MHz, APB: %lu MHz)\n",
+         (unsigned long)(cpu_freq_hz / 1000000),
+         (unsigned long)(xtal_freq_hz / 1000000),
+         (unsigned long)(apb_freq_hz / 1000000));
+  printf("Instruction Cache:     32 KB L1 I-Cache per HP core\n");
+  printf("Data Cache:            32 KB L1 D-Cache per HP core\n");
+  printf("L2 Unified Cache:      128 KB\n");
+  printf("Tightly Coupled RAM:   128 KB zero-wait-state HP TCM\n");
+  printf("ISA Features:          FPU (Single-precision), Packed-SIMD DSP, 128-bit AI SIMD (PIE),\n"
+         "                       Hardware Loops, Atomic (A), Compressed (C)\n");
   return 0;
 }
 
@@ -1803,6 +1835,12 @@ static void register_commands(void)
           .help = "Show OS and chip information",
           .hint = NULL,
           .func = &cmd_uname,
+      },
+      {
+          .command = "cpuinfo",
+          .help = "Show CPU architecture, clock frequencies, and cache specifications",
+          .hint = NULL,
+          .func = &cmd_cpuinfo,
       },
       {
           .command = "ota_status",
