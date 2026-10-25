@@ -92,6 +92,7 @@ make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
 ### Documentation
 
 Check out the [docs](docs) directory for more information about the supported boards and my notes on them.
+
 See the [experiments](experiments) directory for information about experiments using the microcontrollers.
 
 ---
