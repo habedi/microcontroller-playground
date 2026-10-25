@@ -73,36 +73,11 @@ static void coord_limit(int* _x, int* _y)
 
 /* Initialization */
 
-static const unsigned char* ttbuf;
-static size_t ttsize;
-
-static tBoolean __init ttdim(size_t number_of_bytes)
-{ tBoolean retval;
-  if (ttsize >= number_of_bytes) { ttsize -= number_of_bytes; retval = truE; }
-  else retval = falsE;
-  return(retval);
-}
-
-static my_inline tSint16 __init __calc_short(const unsigned char* ptr)
-{ const unsigned char byte1 = ptr[0], byte2 = ptr[1];
-  return(((tSint16) byte1) | (((tSint16) byte2) << 8));
-}
-
-static one_caller tBoolean __init calc_short(/*@out@*/ tSint16* dest,
-  size_t count)
-{ if (!ttdim(2 * count)) return(falsE);
-  while (count-- > 0) { *dest++ = __calc_short(ttbuf); ttbuf += 2; }
-  return(truE);
-}
-
 my_enum1 enum
 { shvColumns = 0, shvLines = 1, shvMaxColors = 2, shvMaxPairs = 3,
   shvNoColorVideo = 4
 } my_enum2(unsigned char) tShortValue;
 #define NUM_SHORT_VALUES (5)
-
-static const unsigned char short_index[NUM_SHORT_VALUES] __initdata =
-{ 0, 2, 13, 14, 15 };
 
 static const_after_init tSint16 short_value[NUM_SHORT_VALUES];
 
@@ -117,11 +92,6 @@ my_enum1 enum
   strvInitializeColor = 22, strvInitializePair = 23, strvSetColorPair = 24
 } my_enum2(unsigned char) tStringValue;
 #define NUM_STRING_VALUES (25)
-
-static const unsigned short string_index[NUM_STRING_VALUES] __initdata =
-{ 5, 10 | 1024, 27, 28, 34, 36, 39, 40, 44, 59, 61, 76, 77, 79, 81, 82, 83,
-  87, 88, 89, 164, 298, 299, 300, 301
-};
 
 #define NUM_KEY_VALUES (10)
 static const struct
@@ -157,131 +127,57 @@ static tBoolean strv_try(tStringValue v)
   return(is_available);
 }
 
-#define TI_BAD(str) do { debugmsg("TI_BAD(" str ")\n"); goto bad; } while (0)
+#define INPUTBUFLEN (100)
+typedef unsigned char tInputbufIndex;
+static tInputbufIndex inputbuf_count = 0, fragmentbuf_count = 0;
+static tKey inputbuf[INPUTBUFLEN];
+static char fragmentbuf[INPUTBUFLEN];
+static tBoolean time_limit_is_valid = falsE;
 
 static tBoolean bicurses_timeout_handler(/*@out@*/ int*); /* prototype */
 
 WINDOW* __init initscr(void)
-{ const char *termname = getenv("TERM"), *termpath, *strEA;
-  const unsigned char* siptr; /* "strings index pointer" */
-  char ch, *filename;
-  void* filebuf;
-  size_t filesize;
-  tBoolean need_slash;
-  tSint16 header[6], names_size, flags_size, num_shorts, num_strings,
-    strings_size;
+{ const char *strEA;
 
-  if ( (termname == NULL) || ( (ch = *termname) == '\0') )
-    fatal_error(0, _("bad value of environment variable TERM"));
-  debugmsg("termname=*"); debugmsg(termname); debugmsg("*\n");
-  termpath = getenv("TERMINFO");
-  if ( (termpath == NULL) || (*termpath == '\0') )
-  { termpath = "/usr/share/terminfo/"; need_slash = falsE; }
-  else need_slash = cond2boolean(termpath[strlen(termpath) - 1] != chDirsep);
-  debugmsg("termpath=*"); debugmsg(termpath); debugmsg("*\n");
-  my_spf(strbuf, STRBUF_SIZE, &filename, "%s%s%c/%s", termpath,
-    (need_slash ? strSlash : strEmpty), ch, termname);
-  debugmsg("filename=*"); debugmsg(filename); debugmsg("*\n");
-  if (my_mmap_file_readonly(filename, &filebuf, &filesize) != 2)
-  { bad: fatal_error(0, _("bad terminfo file")); }
-  my_spf_cleanup(strbuf, filename);
+  num_key_strings = 0;
+  inputbuf_count = 0;
+  fragmentbuf_count = 0;
+  time_limit_is_valid = falsE;
+  currattr = 0;
+  currtermattr = 0;
+  igntermattr = 0;
+  refreshbuf_used = 0;
 
-  ttbuf = filebuf; ttsize = filesize;
+  short_value[shvColumns] = 80;
+  short_value[shvLines] = 24;
+  short_value[shvMaxColors] = 8;
+  short_value[shvMaxPairs] = 64;
+  short_value[shvNoColorVideo] = 0;
 
-  /* get the header */
-  if (!calc_short(header, 6)) TI_BAD("header");
-#if CONFIG_DEBUG
-  sprint_safe(strbuf, "terminfo header: %d - %d - %d - %d - %d - %d\n",
-    header[0], header[1], header[2], header[3], header[4], header[5]);
-  debugmsg(strbuf);
-#endif
-  if (header[0] != 0432) TI_BAD("magic");
-  if ( (  names_size = header[1]) < 0 ) TI_BAD("h1");
-  if ( (  flags_size = header[2]) < 0 ) TI_BAD("h2");
-  if ( (  num_shorts = header[3]) < 0 ) TI_BAD("h3");
-  if ( ( num_strings = header[4]) < 0 ) TI_BAD("h4");
-  if ( (strings_size = header[5]) < 0 ) TI_BAD("h5");
-
-  /* skip the terminal names */
-  if (!ttdim(names_size)) TI_BAD("names");
-  ttbuf += names_size;
-
-  /* skip the flags */
-  if (!ttdim(flags_size)) TI_BAD("flags");
-  ttbuf += flags_size;
-  if (((long int) ttbuf) & 1) { if (!ttdim(1)) { TI_BAD("flags2"); } ttbuf++; }
-
-  /* handle the short values */
-  if (!ttdim(2 * num_shorts)) TI_BAD("short");
-  my_memclr_arr(short_value);
-  { tShortValue i;
-    for (i = 0; i < NUM_SHORT_VALUES; i++)
-    { const size_t idx = short_index[i];
-      tSint16 v;
-      if ((tSint16) idx >= num_shorts) break; /* not so many shorts defined */
-      v = __calc_short(ttbuf + 2 * idx);
-      if (v > 0) short_value[i] = v;
-    }
-  }
-  ttbuf += 2 * num_shorts;
-
-  /* handle the strings */
-  if (!ttdim(2 * num_strings)) TI_BAD("stridx");
-  siptr = ttbuf; ttbuf += 2 * num_strings;
   my_memclr_arr(string_value);
-  { tStringValue i;
-    for (i = 0; i < NUM_STRING_VALUES; i++)
-    { size_t idx = string_index[i];
-      tBoolean is_required;
-      if (idx & 1024) { idx &= ~1024; is_required = truE; }
-      else is_required = falsE;
-      if ((tSint16) idx < num_strings)
-      { const tSint16 v = __calc_short(siptr + 2 * idx);
-        if ( (v == -1) || (v == -2) ) { if (is_required) goto rvm; }
-        else if (v < 0) TI_BAD("stridx2");
-        else /* cautiously try to get the string */
-        { const unsigned char *ptr, *ptr2;
-          char* dest;
-          size_t size_left, size;
-          if ((ssize_t) ttsize <= v) TI_BAD("stridx3");
-          size_left = ttsize - v; ptr = ptr2 = ttbuf + v;
-          while (size_left > 0)
-          { if (*ptr2++ == '\0') goto string_terminates;
-            size_left--;
-          }
-          TI_BAD("unterminated string");
-          string_terminates:
-          size = ptr2 - ptr;
-          if (size <= 1) /* string is empty */
-          { if (is_required) goto rvm;
-            else goto next_string;
-          }
-          else if (size > STRBUF_SIZE / 2) /* can't be serious */
-            TI_BAD("string length");
-          string_value[i] = dest = __memory_allocate(size, mapPermanent);
-          my_memcpy(dest, ptr, size);
-#if CONFIG_DEBUG
-          sprint_safe(strbuf, "terminfo string: %d - %d - %d - *%s*", i, idx,
-            v, dest);
-          { unsigned char* x = (unsigned char*) strbuf;
-            while (1)
-            { const unsigned char uch = *x;
-              if (uch == '\0') break;
-              else if (uch < 32) *x = '?'; /* esp. for the escape character */
-              x++;
-            }
-          }
-          debugmsg(strbuf); debugmsg(strNewline);
-#endif
-        }
-      }
-      else if (is_required)
-      { rvm: fatal_error(0, _("required value missing in terminfo file")); }
-      next_string: {}
-    }
-  }
+  string_value[strvClearScreen] = "\033[H\033[2J";
+  string_value[strvMove] = "\033[%i%p1%d;%p2%dH";
+  string_value[strvEnterBold] = "\033[1m";
+  string_value[strvEnterCa] = "\033[?1049h";
+  string_value[strvEnterReverse] = "\033[7m";
+  string_value[strvEnterUnderline] = "\033[4m";
+  string_value[strvExitAttrs] = "\033[m";
+  string_value[strvExitCa] = "\033[?1049l";
+  string_value[strvExitUnderline] = "\033[24m";
+  string_value[strvKeyDc] = "\033[3~";
+  string_value[strvKeyDown] = "\033[B";
+  string_value[strvKeyHome] = "\033[H";
+  string_value[strvKeyIc] = "\033[2~";
+  string_value[strvKeyLeft] = "\033[D";
+  string_value[strvKeyNpage] = "\033[6~";
+  string_value[strvKeyPpage] = "\033[5~";
+  string_value[strvKeyRight] = "\033[C";
+  string_value[strvKeyUp] = "\033[A";
+  string_value[strvKeypadLocal] = "\033[?1l";
+  string_value[strvKeypadXmit] = "\033[?1h";
+  string_value[strvKeyEnd] = "\033[F";
+  string_value[strvOrigColors] = "\033[39;49m";
 
-  my_munmap(filebuf, filesize);
   strEA = string_value[strvExitAttrs];
 
   /* check some terminal capabilities */
@@ -324,6 +220,9 @@ WINDOW* __init initscr(void)
   }
 
   my_memclr_arr(refresh_statvar); my_memclr_arr(refresh_dynvar);
+  if (stdscr->text != NULL) __dealloc(stdscr->text);
+  if (stdscr->attr != NULL) __dealloc(stdscr->attr);
+  if (stdscr->dirty_lines != NULL) __dealloc(stdscr->dirty_lines);
   my_memclr_var(__stdscr); reinit_stdscr_data();
   (void) strv_try(strvEnterCa); (void) strv_try(strvKeypadXmit);
   if (strEA != NULL) refreshbuf_append_str(strEA);
@@ -450,14 +349,6 @@ int start_color(void)
 
 
 /* getch() */
-
-#define INPUTBUFLEN (100)
-typedef unsigned char tInputbufIndex;
-static tInputbufIndex inputbuf_count = 0, fragmentbuf_count = 0;
-static tKey inputbuf[INPUTBUFLEN];
-static char fragmentbuf[INPUTBUFLEN];
-
-static tBoolean time_limit_is_valid = falsE;
 
 #if HAVE_GETTIMEOFDAY
 

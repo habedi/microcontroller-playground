@@ -31,7 +31,7 @@ enum
   htkS = 51, htkScript = 52, htkSelect = 53, htkStrike = 54, htkStrong = 55,
   htkStyle = 56, htkSub = 57, htkSup = 58, htkTable = 59, htkTd = 60,
   htkTextarea = 61, htkTh = 62, htkTitle = 63, htkTr = 64, htkU = 65,
-  htkUl = 66, 
+  htkUl = 66,
   htkInvalid = 255
 };
 typedef unsigned char tHtmlTagKind;

@@ -7126,6 +7126,17 @@ int retawq_main(int argc, const char** argv)
   {
     return retawq_exit_code;
   }
+  launch_uri_count = 0;
+  launch_uri[0] = NULL;
+  launch_uri[1] = NULL;
+  program_mode = pmEnvironed;
+  windowlisthead = NULL;
+  windowlisttail = NULL;
+  visible_window_x[0] = NULL;
+  visible_window_x[1] = NULL;
+  current_window_index_x = 0;
+  keymap_command_keys_num = 0;
+  keymap_lineinput_keys_num = 0;
   initialize(argc, argv);
   main_initialize();
 

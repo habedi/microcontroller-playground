@@ -222,6 +222,7 @@ tBoolean my_pattern_matcher(const char* pattern, const char* str)
 #include <setjmp.h>
 jmp_buf retawq_exit_jmp;
 int retawq_exit_code = 0;
+static tBoolean fatal_error_recursive = falsE;
 
 static void does_not_return do_quit_msg(int exitcode, const char* msg)
 { if (need_tglib_cleanup)
@@ -233,6 +234,7 @@ static void does_not_return do_quit_msg(int exitcode, const char* msg)
 #elif TGC_IS_CURSES
     (void) endwin();
 #endif
+    need_tglib_cleanup = falsE;
   }
 #if MIGHT_DO_TERMIOS
   if (do_restore_termios)
@@ -249,6 +251,7 @@ static void does_not_return do_quit_msg(int exitcode, const char* msg)
     debugmsg(msg);
   }
   resource_quit();
+  fatal_error_recursive = falsE;
   retawq_exit_code = exitcode;
   longjmp(retawq_exit_jmp, 1);
 }
@@ -268,11 +271,10 @@ void fatal_error(int err, const char* str)
    constant or 0. */
 { static const char prefix[] = N_("retawq: fatal error: ");
     /* ugly colon-ialism... */
-  static tBoolean is_recursive = falsE;
-  const tBoolean is_rec = is_recursive;
+  const tBoolean is_rec = fatal_error_recursive;
   char buf[1000];
   const char* ptr;
-  is_recursive = truE;
+  fatal_error_recursive = truE;
   /* if (lfdmbs(2)) */
   { const char* p = ( is_rec ? prefix : _(prefix) );
     my_write_str(fd_stderr, p); my_write_str(fd_stderr, str);
@@ -800,7 +802,13 @@ void fd_multiplex(void)
 #if MIGHT_NEED_TIMEOUTS
     struct timeval tov, *tovp;
     if (!do_timeout) tovp = NULL;
-    else { my_memclr_var(tov); tov.tv_usec = msec * 1000; tovp = &tov; }
+    else
+    {
+      my_memclr_var(tov);
+      tov.tv_sec = msec / 1000;
+      tov.tv_usec = (msec % 1000) * 1000;
+      tovp = &tov;
+    }
 #else
 #define tovp (NULL)
 #endif

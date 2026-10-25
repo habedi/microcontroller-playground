@@ -236,13 +236,8 @@ static pid_t pid_main = 0, pid_dns = 0; /* PIDs of our threads */
 
 /** Socket addresses */
 
-#if USE_IPv6
 typedef struct sockaddr_storage tSockaddr;
-#define HINT_AF (AF_UNSPEC)
-#else
-typedef struct sockaddr tSockaddr;
 #define HINT_AF (AF_INET)
-#endif
 
 typedef signed char tSockaddrRating;
 #define SOCKADDR_RATING_NONE (-1) /* (for "best rating" algorithms only) */
@@ -481,16 +476,12 @@ static one_caller void my_getaddrinfo(tDnsLookup* dns_lookup)
   if ( (err == 0) && ( (result = orig_result) != NULL) )
   { do
     { const struct sockaddr* addr = result->ai_addr;
-      const size_t addrlen = result->ai_addrlen;
-      if ( (addr != NULL) && (addrlen > 0) && (addrlen <= sizeof(tSockaddr)) )
+      size_t addrlen = result->ai_addrlen;
+      if (addr != NULL)
       { const int address_family = result->ai_family;
-        if ( (address_family == AF_INET)
-#if USE_IPv6
-            || (address_family == AF_INET6)
-#endif
-           )
-        { /* (Especially if <hints> contains AF_UNSPEC, getaddrinfo() might
-              e.g. return an AF_UNIX address for hostname "localhost".) */
+        if (address_family == AF_INET)
+        {
+          addrlen = sizeof(struct sockaddr_in);
           store_sockaddr(dns_lookup, (const tSockaddr*) addr, address_family,
             addrlen);
           if (dns_lookup->num >= MAXNUM_SOCKADDRS) break; /* got "enough" */

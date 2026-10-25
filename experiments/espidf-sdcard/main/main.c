@@ -765,9 +765,43 @@ static int cmd_retawq(int argc, char **argv)
     {
       printf("Usage: retawq <url> or retawq --dump=<url>\n");
       printf("Example: retawq http://example.com\n");
+      printf("Note: Press 'q' then 'y' (or 'Q') to quit the interactive browser.\n");
       return 1;
     }
-  return retawq_main(argc, (const char **)argv);
+
+  const char *norm_argv[argc + 1];
+  char url_buf[256];
+  norm_argv[0] = argv[0];
+
+  for (int i = 1; i < argc; i++)
+    {
+      const char *arg = argv[i];
+      if (strncmp(arg, "--dump=", 7) == 0)
+        {
+          const char *dump_url = arg + 7;
+          if (strstr(dump_url, "://") == NULL && strncmp(dump_url, "about:", 6) != 0 && dump_url[0] != '/')
+            {
+              snprintf(url_buf, sizeof(url_buf), "--dump=http://%s", dump_url);
+              norm_argv[i] = url_buf;
+            }
+          else
+            {
+              norm_argv[i] = arg;
+            }
+        }
+      else if (arg[0] != '-' && strstr(arg, "://") == NULL && strncmp(arg, "about:", 6) != 0 && arg[0] != '/' && arg[0] != '.')
+        {
+          snprintf(url_buf, sizeof(url_buf), "http://%s", arg);
+          norm_argv[i] = url_buf;
+        }
+      else
+        {
+          norm_argv[i] = arg;
+        }
+    }
+  norm_argv[argc] = NULL;
+
+  return retawq_main(argc, norm_argv);
 }
 
 static int cmd_uname(int argc, char **argv)
