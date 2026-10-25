@@ -12,11 +12,11 @@ This is a playground for my microcontroller projects and experiments.
 
 ### Supported Hardware
 
-| # | Board / MCU                         | Specifications                                                                                                                                                | Local Notes                                              |                                            Image                                             |
-|---|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|:--------------------------------------------------------------------------------------------:|
-| 1 | Raspberry Pi Pico 2 WH (RP2350)     | [Pico 2 Specs](https://www.raspberrypi.com/products/raspberry-pi-pico-2/), [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf) | [Pico 2 Notes](docs/raspberrypi-pico-2.md)               |     <img src="docs/assets/images/pico2wh.png" alt="Raspberry Pi Pico 2 WH" width="150">      |
-| 2 | Waveshare ESP32-P4-WIFI6 (ESP32-P4) | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-P4-WIFI6), [Espressif ESP32-P4 Specs](https://www.espressif.com/en/products/socs/esp32-p4)              | [ESP32-P4 Notes](docs/esp32p4.md)                        | <img src="docs/assets/images/esp32-p4-wifi6.png" alt="Waveshare ESP32-P4-WIFI6" width="150"> |
-| 3 | Waveshare ESP32-S3-Zero (ESP32-S3)  | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-S3-Zero), [Espressif ESP32-S3 Specs](https://www.espressif.com/en/products/socs/esp32-s3)                | [ESP32-S3 Notes](docs/esp32s3.md)                        | <img src="docs/assets/images/esp32-s3-zero-n8r8.png" alt="Waveshare ESP32-S3-Zero" width="150"> |
+| # | Board / Module / MCU                | Specifications                                                                                                                                                | Local Notes                                |                                              Image                                              |
+|---|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|:-----------------------------------------------------------------------------------------------:|
+| 1 | Raspberry Pi Pico 2 WH (RP2350)     | [Pico 2 Specs](https://www.raspberrypi.com/products/raspberry-pi-pico-2/), [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf) | [Pico 2 Notes](docs/raspberrypi-pico-2.md) |       <img src="docs/assets/images/pico2wh.png" alt="Raspberry Pi Pico 2 WH" width="150">       |
+| 2 | Waveshare ESP32-P4-WIFI6 (ESP32-P4) | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-P4-WIFI6), [Espressif ESP32-P4 Specs](https://www.espressif.com/en/products/socs/esp32-p4)              | [ESP32-P4 Notes](docs/esp32p4.md)          |  <img src="docs/assets/images/esp32-p4-wifi6.png" alt="Waveshare ESP32-P4-WIFI6" width="150">   |
+| 3 | Waveshare ESP32-S3-Zero (ESP32-S3)  | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-S3-Zero), [Espressif ESP32-S3 Specs](https://www.espressif.com/en/products/socs/esp32-s3), [Electrokit](https://www.electrokit.com/en/esp32-s3-dev-board-mini-8mb-psram-8mb-with-headers) | [ESP32-S3 Notes](docs/esp32s3.md)          | <img src="docs/assets/images/esp32-s3-zero-n8r8.png" alt="Waveshare ESP32-S3-Zero" width="150"> |
 
 ---
 
@@ -112,11 +112,13 @@ make idfrs-build  # idf-rs RGB cycle on the ESP32-S3
 make zig-build    # MicroZig GPIO blink on the Pico 2 WH
 ```
 
-Rust experiments belong to the root Cargo workspace, which shares `Cargo.lock` and the release profile. Standalone toolchain packages such as `rgb-cycle` use the Xtensa `esp` toolchain with `ldproxy`.
+Rust experiments belong to the root Cargo workspace, which shares `Cargo.lock` and the release profile. Standalone toolchain packages such as
+`rgb-cycle` use the Xtensa `esp` toolchain with `ldproxy`.
 The root `build.zig` builds the Zig firmware, with MicroZig pinned in the root `build.zig.zon`.
 All build commands run from the repository root.
 
-See [Serial Heartbeat](experiments/serial-heartbeat/README.md), [RGB Cycle](experiments/rgb-cycle/README.md), and [GPIO Blink](experiments/gpio-blink/README.md) for dependency pins, wiring, output paths, and flashing commands.
+See [Serial Heartbeat](experiments/serial-heartbeat/README.md), [RGB Cycle](experiments/rgb-cycle/README.md),
+and [GPIO Blink](experiments/gpio-blink/README.md) for dependency pins, wiring, output paths, and flashing commands.
 The Rust example replaces the C6's wireless firmware if flashed.
 Current esp-rs P4 support does not cover this board's v1.3 silicon.
 

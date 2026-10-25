@@ -1,6 +1,10 @@
-/* SDMMC MicroSD, LittleFS, Wi-Fi client, and terminal editor on ESP32-P4.
+/* SDMMC MicroSD, LittleFS, Wi-Fi client, and terminal editor on ESP32-P4 and
+ * ESP32-S3.
  *
- * Hardware configuration:
+ * The ESP32-S3 build has no MicroSD socket, drives Wi-Fi from its own radio,
+ * and runs the console over USB Serial/JTAG. It keeps LittleFS on /data.
+ *
+ * ESP32-P4 hardware configuration:
  *   - On-chip LDO channel 4 supplies power to the ESP32-P4 SDMMC IO pad domain.
  *   - GPIO 45 drives the onboard MicroSD socket power switch (active low).
  *   - Host slot 0 is the native SDMMC controller for MicroSD card (/sdcard).
@@ -53,8 +57,10 @@
 #include "lwip/netdb.h"
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
-#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
+
+#if CONFIG_IDF_TARGET_ESP32P4
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 
 #define PIN_TF_PWR   GPIO_NUM_45
 #define PIN_TF_CLK   GPIO_NUM_43
@@ -64,19 +70,26 @@
 #define PIN_TF_D2    GPIO_NUM_41
 #define PIN_TF_D3    GPIO_NUM_42
 #define PIN_C6_RESET GPIO_NUM_54
+#endif
 
 #define SDCARD_MOUNT_POINT "/sdcard"
 #define LITTLEFS_MOUNT_POINT "/data"
+#if CONFIG_IDF_TARGET_ESP32P4
+#define SHELL_HOME SDCARD_MOUNT_POINT
+#else
+#define SHELL_HOME LITTLEFS_MOUNT_POINT
+#endif
 #define SHELL_MAX_CMDLINE 256
 
 static const char *TAG = "espidf_shell";
 
-static char s_cwd[256] = SDCARD_MOUNT_POINT;
+static char s_cwd[256] = SHELL_HOME;
 static esp_netif_t *s_sta_netif = NULL;
 static bool s_wifi_initialized = false;
 static bool s_wifi_connected = false;
 static SemaphoreHandle_t s_ip_sem = NULL;
 
+#if CONFIG_IDF_TARGET_ESP32P4
 static void power_on_slot(void)
 {
   gpio_config_t io_conf = {
@@ -90,6 +103,7 @@ static void power_on_slot(void)
   gpio_set_level(PIN_TF_PWR, 0);
   vTaskDelay(pdMS_TO_TICKS(300));
 }
+#endif
 
 static bool resolve_path(const char *in, char *out, size_t out_len)
 {
@@ -745,6 +759,7 @@ static int cmd_cpuinfo(int argc, char **argv)
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &apb_freq_hz);
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &xtal_freq_hz);
 
+#if CONFIG_IDF_TARGET_ESP32P4
   printf("CPU Architecture:      RISC-V 32-bit (RV32IMAFCP + Espressif PIE)\n");
   printf("Target Chip:           ESP32-P4 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
   printf("High-Performance Core: %d cores (Active Core ID: %d)\n", chip_info.cores, esp_cpu_get_core_id());
@@ -759,6 +774,16 @@ static int cmd_cpuinfo(int argc, char **argv)
   printf("Tightly Coupled RAM:   128 KB zero-wait-state HP TCM\n");
   printf("ISA Features:          FPU (Single-precision), Packed-SIMD DSP, 128-bit AI SIMD (PIE),\n"
          "                       Hardware Loops, Atomic (A), Compressed (C)\n");
+#else
+  printf("CPU Architecture:      Xtensa 32-bit LX7\n");
+  printf("Target Chip:           ESP32-S3 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
+  printf("Cores:                 %d (Active Core ID: %d)\n", chip_info.cores, esp_cpu_get_core_id());
+  printf("CPU Clock Frequency:   %lu MHz (XTAL: %lu MHz, APB: %lu MHz)\n",
+         (unsigned long)(cpu_freq_hz / 1000000),
+         (unsigned long)(xtal_freq_hz / 1000000),
+         (unsigned long)(apb_freq_hz / 1000000));
+  printf("ISA Features:          FPU (Single-precision), SIMD vector instructions, Hardware Loops\n");
+#endif
   return 0;
 }
 
@@ -856,6 +881,7 @@ static int cmd_reboot(int argc, char **argv)
   return 0;
 }
 
+#if CONFIG_IDF_TARGET_ESP32P4
 static int cmd_reset_c6(int argc, char **argv)
 {
   gpio_config_t io_conf = {
@@ -874,6 +900,7 @@ static int cmd_reset_c6(int argc, char **argv)
   gpio_set_level(PIN_C6_RESET, 1);
   return 0;
 }
+#endif
 
 static const char *ota_state_str(esp_ota_img_states_t state)
 {
@@ -1633,7 +1660,7 @@ static void init_wifi(void)
   err = esp_wifi_init(&cfg);
   if (err != ESP_OK)
     {
-      ESP_LOGW(TAG, "esp_wifi_init failed: %s (SDIO link to C6 not ready)", esp_err_to_name(err));
+      ESP_LOGW(TAG, "esp_wifi_init failed: %s (radio not ready)", esp_err_to_name(err));
       return;
     }
 
@@ -1809,12 +1836,14 @@ static void register_commands(void)
   esp_console_register_help_command();
 
   const esp_console_cmd_t cmds[] = {
+#if CONFIG_IDF_TARGET_ESP32P4
       {
           .command = "reset_c6",
           .help = "Pulse hardware reset line (GPIO 54) to ESP32-C6",
           .hint = NULL,
           .func = &cmd_reset_c6,
       },
+#endif
       {
           .command = "top",
           .help = "Show live FreeRTOS tasks and CPU usage",
@@ -2011,8 +2040,11 @@ static void register_commands(void)
 
 void app_main(void)
 {
-  ESP_LOGI(TAG, "Starting ESP32-P4 workstation firmware");
+  ESP_LOGI(TAG, "Starting %s workstation firmware", CONFIG_IDF_TARGET);
 
+  esp_err_t ret;
+
+#if CONFIG_IDF_TARGET_ESP32P4
   /* 1. Initialize MicroSD Card */
   power_on_slot();
 
@@ -2024,7 +2056,7 @@ void app_main(void)
       .ldo_chan_id = 4,
   };
   sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
-  esp_err_t ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
+  ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
   if (ret != ESP_OK)
     {
       ESP_LOGE(TAG, "Failed to create LDO power control handle (%s)", esp_err_to_name(ret));
@@ -2059,6 +2091,7 @@ void app_main(void)
     {
       ESP_LOGE(TAG, "Failed to mount SD card (%s)", esp_err_to_name(ret));
     }
+#endif
 
   /* 2. Initialize LittleFS on Internal Flash */
   esp_vfs_littlefs_conf_t lfs_conf = {
@@ -2077,7 +2110,7 @@ void app_main(void)
       ESP_LOGE(TAG, "Failed to mount LittleFS (%s)", esp_err_to_name(ret));
     }
 
-  /* 3. Initialize Wi-Fi via onboard ESP32-C6 */
+  /* 3. Initialize Wi-Fi (P4 reaches the radio on the onboard ESP32-C6) */
   init_wifi();
 
   /* 4. Initialize Interactive REPL Console */
@@ -2088,8 +2121,13 @@ void app_main(void)
   /* Leave room for filesystem completion and command handlers. */
   repl_config.task_stack_size = 16384;
 
+#if CONFIG_IDF_TARGET_ESP32P4
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
+#else
+  esp_console_dev_usb_serial_jtag_config_t jtag_config = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&jtag_config, &repl_config, &repl));
+#endif
 
   /* Force enable raw mode for readline, arrow keys, history, and tab completion */
   linenoiseSetDumbMode(0);
@@ -2125,9 +2163,15 @@ void app_main(void)
 
   printf("\n");
   printf("====================================================\n");
+#if CONFIG_IDF_TARGET_ESP32P4
   printf("  ESP32-P4 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
   printf("  Storage: /sdcard (FATFS), /data (LittleFS)\n");
   printf("  Network: Wi-Fi STA via ESP32-C6 coprocessor\n");
+#else
+  printf("  ESP32-S3 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
+  printf("  Storage: /data (LittleFS)\n");
+  printf("  Network: Wi-Fi STA on the onboard radio\n");
+#endif
   printf("  FOTA:    Rolling-Rollback (ota_status, ota_update, ota_rollback)\n");
   printf("  Editor:  nano <file> / edit <file>\n");
   printf("  Type 'help' to list available commands\n");

@@ -1,0 +1,24 @@
+# Silicon revision v1.3 compatibility options.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# Primary console on UART0 (onboard CH343 bridge).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Partition table and 16 MB flash size.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# 32 MB PSRAM in 16-line mode at 200 MHz.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# Route Wi-Fi API through ESP-Hosted over SDIO to onboard C6.
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+
+# The ECDSA peripheral is unavailable on ESP32-P4 silicon revision v1.3.
+# CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY is not set
