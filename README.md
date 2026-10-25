@@ -60,12 +60,6 @@ Press Enter twice after opening the console to reach the `nsh>` prompt.
   <img alt="NuttShell" src="docs/assets/images/pico2w-nsh-1.jpeg" width="100%">
 </div>
 
-The `usbnsh` configuration provides a console over USB.
-The `nsh` configuration routes to UART0 pins GP0 and GP1 via a USB-to-UART adapter.
-
-Flashing needs BOOTSEL mode;
-`make flash-pico-uf2` copies the UF2 to the exposed drive, while `make flash-pico` uses picotool (which needs `make setup-udev`).
-
 #### 4. Build and run on the ESP32-P4
 
 ```shell
