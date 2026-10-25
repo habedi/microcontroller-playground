@@ -1,5 +1,6 @@
 [workspace]
 members = ["experiments/serial-heartbeat"]
+exclude = ["experiments/rgb-cycle"]
 resolver = "3"
 
 [profile.release]

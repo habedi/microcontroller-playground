@@ -43,6 +43,7 @@
             xz
             sqlite
             libffi
+            libxml2
           ];
 
           nuttxTools = with pkgs; [
@@ -92,6 +93,9 @@
             zig-overlay.packages.${system}."0.17.0"
             pkgs.probe-rs-tools
             pkgs.espflash
+            pkgs.cargo-generate
+            pkgs.ldproxy
+            pkgs.espup
           ];
         in
         {
@@ -104,6 +108,14 @@
             shellHook = ''
               export PICO_SDK_PATH="$PWD/external/pico-sdk"
               export PLAYGROUND_ROOT="$PWD"
+
+              # Source Xtensa Rust toolchain environment if installed by espup.
+              if [ -f "$HOME/export-esp.sh" ]; then
+                . "$HOME/export-esp.sh"
+              fi
+
+              # Needed for clang/esp-clang to locate libxml2.so.2.
+              export LD_LIBRARY_PATH="${pkgs.libxml2.out}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
               # Needed for aclocal to locate libtool macros during autoreconf.
               export ACLOCAL_PATH="${pkgs.libtool}/share/aclocal''${ACLOCAL_PATH:+:$ACLOCAL_PATH}"

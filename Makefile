@@ -39,6 +39,10 @@ RUST_TARGET   ?= riscv32imac-unknown-none-elf
 RUST_BUILD    ?= $(CURDIR)/build/rust
 ZIG_BUILD     ?= $(CURDIR)/build/zig
 
+# Rust ESP-IDF (idf-rs) experiments.
+IDFRS_SRC     ?= experiments/rgb-cycle
+IDFRS_PORT    ?= /dev/ttyACM0
+
 # Serial port and build directory for the onboard ESP32-C6.
 C6_PORT       ?= /dev/ttyUSB0
 C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
@@ -386,6 +390,16 @@ rust-build: ## Build a Rust workspace package (RUST_PACKAGE=<name>)
 .PHONY: zig-build
 zig-build: ## Build MicroZig firmware with the root build script
 	zig build -Doptimize=ReleaseSmall --prefix $(ZIG_BUILD)
+
+# Rust ESP-IDF (idf-rs) experiments.
+.PHONY: idfrs-build
+idfrs-build: ## Build an idf-rs Rust experiment (IDFRS_SRC=<dir>)
+	bash -c 'test -f $$HOME/export-esp.sh && . $$HOME/export-esp.sh; \
+		cd $(IDFRS_SRC) && cargo build --release'
+
+.PHONY: idfrs-flash
+idfrs-flash: ## Flash an idf-rs firmware binary over IDFRS_PORT
+	espflash flash --port $(IDFRS_PORT) --monitor $(RUST_BUILD)/xtensa-esp32s3-espidf/release/$(notdir $(IDFRS_SRC))
 
 # Flashing and the serial console (OS-agnostic)
 .PHONY: flash-pico

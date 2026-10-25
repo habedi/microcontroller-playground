@@ -85,7 +85,7 @@ make console TTY=/dev/ttyACM0
 
 ### Rust and Zig Support
 
-The Nix dev shell includes Rust with embedded targets, espflash, probe-rs, and Zig (0.17.0). 
+The Nix dev shell includes Rust with embedded targets, espflash, probe-rs, and Zig (0.17.0).
 The following experiments are built without connecting a board:
 
 ```shell

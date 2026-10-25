@@ -21,6 +21,8 @@ The boards connect over USB to a Linux development machine (amd64 or arm64):
   UART0 bridge (`/dev/ttyACM0`, vendor `1a86`). NuttX board target is `esp32p4-function-ev-board`.
 - Raspberry Pi Pico 2 WH: RP2350 (Arm Cortex-M33 and RISC-V Hazard3 cores) with CYW43439 wireless. NuttX targets Cortex-M33 using board
   `raspberrypi-pico-2`. The `usbnsh` configuration provides console over USB. See `docs/raspberrypi-pico-2.md`.
+- Waveshare ESP32-S3-Zero: ESP32-S3FH8R8 (dual-core Xtensa LX7, 8 MB flash, 8 MB Octal PSRAM) with an onboard WS2812 RGB LED on GPIO 21.
+  USB-C links directly to the internal USB Serial/JTAG controller (`/dev/ttyACM0`, vendor `303a`). See `docs/esp32s3.md`.
 - 40-pin male-to-female Dupont jumper wires, 30 cm, for peripheral wiring.
 
 ## Core Rules
@@ -87,6 +89,7 @@ Serial console:
 
 - Pico 2: builds with `arm-none-eabi-gcc` from the dev shell.
 - ESP32-P4 and ESP32-C6: build with custom `riscv32-none-elf-gcc` (GCC 14, `rv32imac`, `ilp32`) provided by `flake.nix`.
+- ESP32-S3: builds with the Xtensa Rust compiler (`esp` channel from `espup`) targeting `xtensa-esp32s3-espidf` with `ldproxy`.
 - Prefix: `make nuttx-*` passes `CROSSDEV=riscv32-none-elf-` automatically for RISC-V builds.
 - Rust: provided by `rust-overlay` with targets `thumbv8m.main-none-eabihf`, `riscv32imac-unknown-none-elf`, and `riscv32imafc-unknown-none-elf`
   pre-installed. Flash with `probe-rs` (Pico 2) or `espflash` (ESP32).

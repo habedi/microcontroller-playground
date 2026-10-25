@@ -1,0 +1,26 @@
+[workspace]
+
+[package]
+name = "rgb-cycle"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rgb-cycle"
+harness = false
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
+
+[dependencies]
+log = "0.4"
+esp-idf-svc = { version = "0.53", default-features = true }
+esp-idf-hal = "0.47"
+ws2812-esp32-rmt-driver = "0.15"
+
+[build-dependencies]
+embuild = "0.33"
