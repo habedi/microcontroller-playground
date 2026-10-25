@@ -447,6 +447,20 @@ Loadable applications are built as relocatable ELFs (partial linking with `-r`):
    APIs) require an exported symbol table. NuttX provides symbol tables via `tools/mksymtab.c` registered with
    `boardctl(BOARDIOC_APP_SYMTAB)` or `CONFIG_EXECFUNCS_SYMTAB_ARRAY`.
 
+### Bare Metal Zig with MicroZig
+
+`make zig-build` builds [GPIO Blink](../experiments/gpio-blink/README.md) with Zig
+0.17.0 and MicroZig 0.17.20 for the RP2350 Arm Cortex-M33. Zig comes from the locked
+Nix dev shell; MicroZig is pinned by URL and hash in the root `build.zig.zon`.
+The root `build.zig` defines the firmware build.
+
+The experiment toggles GP0 every 500 ms and needs an external LED with a resistor,
+or a logic analyzer. GP25 is part of the wireless interface on the WH board, so it
+cannot serve as the plain Pico 2's onboard LED. The build uses MicroZig's
+`pico2_arm` target without initializing wireless or USB serial.
+
+The firmware builds to ELF and UF2 images. Hardware verification is pending.
+
 ### Not Done Yet
 
 The panel is 240 pixels wide while NES output is 256 and SNES is 256, so an emulator would have to crop or scale

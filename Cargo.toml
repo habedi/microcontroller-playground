@@ -1,0 +1,8 @@
+[workspace]
+members = ["experiments/serial-heartbeat"]
+resolver = "3"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "s"

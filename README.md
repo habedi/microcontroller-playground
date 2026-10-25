@@ -83,6 +83,25 @@ make console TTY=/dev/ttyACM0
 
 ---
 
+### Rust and Zig
+
+The Nix dev shell includes Rust with embedded targets, espflash, probe-rs, and Zig
+0.17.0. The following experiments build without connecting a board:
+
+```shell
+make rust-build   # esp-rs UART heartbeat on the onboard ESP32-C6
+make zig-build    # MicroZig GPIO blink on the Pico 2 WH
+```
+
+Rust experiments belong to the root Cargo workspace, which shares `Cargo.lock` and
+the release profile. The root `build.zig` builds the Zig firmware, with MicroZig
+pinned in the root `build.zig.zon`. Both build commands run from the repository root.
+
+See [Serial Heartbeat](experiments/serial-heartbeat/README.md) and
+[GPIO Blink](experiments/gpio-blink/README.md) for dependency pins, wiring, output
+paths, and flashing commands. The Rust example replaces the C6's wireless firmware
+if flashed. Current esp-rs P4 support does not cover this board's v1.3 silicon.
+
 ### Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to make a contribution.

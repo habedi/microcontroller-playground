@@ -418,6 +418,11 @@ Changing the block size changes the on-disk format, so `/data` reformats on the 
 
 ### Wireless Works via ESP-Hosted After Flashing the C6
 
+Preserve the working C6 SDIO slave firmware.
+Do not erase or flash the onboard C6 without explicit user authorization to replace that firmware and lose P4 wireless access.
+General build, test, or P4 flashing requests do not authorize C6 changes.
+Keep experiments that replace the C6 firmware build-only by default or use a separate ESP32-C6 board for hardware tests.
+
 The P4 has no radio, so Wi-Fi and Bluetooth mean driving the onboard ESP32-C6 over SDIO. Under NuttX there is no
 path at all: the `esp32p4-function-ev-board` port has no SDIO host driver, no Kconfig, and no configuration for
 the companion, and the only P4 board in the tree that mentions it is `esp32p4-tab5`, as a pin map.
@@ -459,6 +464,22 @@ firmware at 230400 baud resolved the issue completely.
 With the C6 flashed and Hole 1 floating, the P4 establishes 4-bit SDIO communication at 40 MHz and proxies
 Wi-Fi scanning successfully. See [../experiments/espidf-wifi](../experiments/espidf-wifi) for the full
 experiment details and reproduction steps.
+
+### Bare Metal Rust
+
+`make rust-build` builds [Serial Heartbeat](../experiments/serial-heartbeat/README.md)
+for the onboard ESP32-C6 using esp-rs. It needs upstream Rust and the
+`riscv32imac-unknown-none-elf` target, both supplied by the Nix dev shell. No Xtensa
+toolchain is needed for either RISC-V chip.
+
+The firmware builds, but hardware verification is pending. Flashing it would replace
+the SDIO slave firmware, so P4 wireless access would stop until that firmware is restored.
+
+The P4 is not used for this Rust experiment. esp-hal 1.2.2 uses
+[v3.x clock interfaces](https://github.com/esp-rs/esp-hal/blob/esp-hal-v1.2.2/esp-hal/src/soc/esp32p4/clocks.rs)
+and [ECO5 ROM symbols](https://github.com/esp-rs/esp-hal/blob/esp-hal-v1.2.2/esp-rom-sys/ld/esp32p4/rom-functions.x).
+This board has v1.3 silicon. Lowering `ESP_HAL_CONFIG_MIN_CHIP_REVISION` alone is not
+enough to make that HAL support this chip.
 
 ### CPython Builds but Does Not Run
 
