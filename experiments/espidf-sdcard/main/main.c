@@ -1116,6 +1116,112 @@ static int cmd_wifi_scan(int argc, char **argv)
   return 0;
 }
 
+static bool read_masked_password(char *buf, size_t max_len)
+{
+  size_t idx = 0;
+  fflush(stdout);
+
+  while (1)
+    {
+      int c = getchar();
+      if (c == EOF || c == 0)
+        {
+          vTaskDelay(pdMS_TO_TICKS(10));
+          continue;
+        }
+
+      if (c == '\r' || c == '\n')
+        {
+          printf("\n");
+          fflush(stdout);
+          buf[idx] = '\0';
+          return true;
+        }
+      else if (c == 0x08 || c == 0x7f) /* Backspace / Delete */
+        {
+          if (idx > 0)
+            {
+              idx--;
+              printf("\b \b");
+              fflush(stdout);
+            }
+        }
+      else if (c == 0x03) /* Ctrl+C */
+        {
+          printf("^C\n");
+          fflush(stdout);
+          memset(buf, 0, max_len);
+          return false;
+        }
+      else if (c >= 32 && c <= 126) /* Printable ASCII */
+        {
+          if (idx < max_len - 1)
+            {
+              buf[idx++] = (char)c;
+              putchar('*');
+              fflush(stdout);
+            }
+        }
+    }
+}
+
+static bool load_wifi_credentials(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READONLY, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+
+  err = nvs_get_str(handle, "ssid", ssid, &ssid_len);
+  if (err == ESP_OK)
+    {
+      err = nvs_get_str(handle, "password", pass, &pass_len);
+    }
+  nvs_close(handle);
+  return (err == ESP_OK && strlen(ssid) > 0);
+}
+
+static bool save_wifi_credentials(const char *ssid, const char *pass)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READWRITE, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+
+  err = nvs_set_str(handle, "ssid", ssid);
+  if (err == ESP_OK && pass != NULL)
+    {
+      err = nvs_set_str(handle, "password", pass);
+    }
+  if (err == ESP_OK)
+    {
+      err = nvs_commit(handle);
+    }
+  nvs_close(handle);
+  return (err == ESP_OK);
+}
+
+static bool clear_wifi_credentials(void)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READWRITE, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+  err = nvs_erase_all(handle);
+  if (err == ESP_OK)
+    {
+      err = nvs_commit(handle);
+    }
+  nvs_close(handle);
+  return err == ESP_OK;
+}
+
 static int cmd_wifi_connect(int argc, char **argv)
 {
   if (!s_wifi_initialized)
@@ -1124,27 +1230,58 @@ static int cmd_wifi_connect(int argc, char **argv)
       return 1;
     }
 
-  if (argc < 2)
+  char ssid[33] = {0};
+  char password[65] = {0};
+
+  if (argc == 1)
     {
-      printf("Usage: wifi_connect <ssid> [password]\n");
-      return 1;
+      /* No arguments: connect using saved NVS credentials */
+      if (!load_wifi_credentials(ssid, sizeof(ssid), password, sizeof(password)))
+        {
+          printf("No saved Wi-Fi credentials found in NVS.\n");
+          printf("Usage: wifi_connect [ssid] [password]\n");
+          return 1;
+        }
+      printf("Using saved credentials for '%s'\n", ssid);
+    }
+  else
+    {
+      if (strlen(argv[1]) >= sizeof(ssid) ||
+          (argc >= 3 && strlen(argv[2]) >= sizeof(password)))
+        {
+          printf("SSID or password is too long.\n");
+          return 1;
+        }
+      strncpy(ssid, argv[1], sizeof(ssid) - 1);
+
+      if (argc >= 3)
+        {
+          /* Password passed directly as argument */
+          strncpy(password, argv[2], sizeof(password) - 1);
+        }
+      else
+        {
+          /* Interactive masked password prompt */
+          printf("Enter password for '%s' (masked): ", ssid);
+          if (!read_masked_password(password, sizeof(password)))
+            {
+              return 1;
+            }
+        }
     }
 
   wifi_config_t wifi_cfg = {0};
-  strncpy((char *)wifi_cfg.sta.ssid, argv[1], sizeof(wifi_cfg.sta.ssid) - 1);
-  if (argc >= 3)
-    {
-      strncpy((char *)wifi_cfg.sta.password, argv[2], sizeof(wifi_cfg.sta.password) - 1);
-    }
+  memcpy(wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
+  memcpy(wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password));
 
   esp_wifi_disconnect();
   s_wifi_connected = false;
   esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
 
-  /* Drop a token left by an earlier attempt that got its IP after timing out. */
+  /* Drop any token left by an earlier attempt */
   xSemaphoreTake(s_ip_sem, 0);
 
-  printf("Connecting to %s...\n", argv[1]);
+  printf("Connecting to %s...\n", ssid);
   esp_wifi_connect();
 
   if (xSemaphoreTake(s_ip_sem, pdMS_TO_TICKS(15000)) == pdTRUE)
@@ -1153,13 +1290,38 @@ static int cmd_wifi_connect(int argc, char **argv)
       esp_netif_get_ip_info(s_sta_netif, &ip_info);
       printf("Connected successfully! IP: " IPSTR ", Gateway: " IPSTR "\n",
              IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
+
+      /* Save credentials to NVS so they persist across restart */
+      if (save_wifi_credentials(ssid, password))
+        {
+          printf("Credentials saved securely to NVS (will auto-connect on boot).\n");
+        }
+
+      /* Clean sensitive password buffers */
+      memset(password, 0, sizeof(password));
+      memset(&wifi_cfg, 0, sizeof(wifi_cfg));
       return 0;
     }
   else
     {
-      printf("Connection timed out.\n");
+      printf("Connection timed out. Check SSID and password.\n");
+      memset(password, 0, sizeof(password));
+      memset(&wifi_cfg, 0, sizeof(wifi_cfg));
       return 1;
     }
+}
+
+static int cmd_wifi_forget(int argc, char **argv)
+{
+  if (clear_wifi_credentials())
+    {
+      esp_wifi_disconnect();
+      s_wifi_connected = false;
+      printf("Saved Wi-Fi credentials erased from NVS.\n");
+      return 0;
+    }
+  printf("Failed to erase Wi-Fi credentials.\n");
+  return 1;
 }
 
 static int cmd_wifi_disconnect(int argc, char **argv)
@@ -1194,6 +1356,18 @@ static int cmd_ifconfig(int argc, char **argv)
   printf("       inet " IPSTR " netmask " IPSTR " broadcast " IPSTR "\n",
          IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&broadcast));
   printf("       gateway " IPSTR "\n", IP2STR(&ip_info.gw));
+
+  char saved_ssid[33] = {0};
+  char dummy_pass[65] = {0};
+  if (load_wifi_credentials(saved_ssid, sizeof(saved_ssid), dummy_pass, sizeof(dummy_pass)))
+    {
+      printf("       saved_network: \"%s\" (in NVS)\n", saved_ssid);
+      memset(dummy_pass, 0, sizeof(dummy_pass));
+    }
+  else
+    {
+      printf("       saved_network: none\n");
+    }
   return 0;
 }
 
@@ -1354,6 +1528,20 @@ static void init_wifi(void)
   esp_wifi_start();
   s_wifi_initialized = true;
   ESP_LOGI(TAG, "Wi-Fi radio is up and ready");
+
+  /* Auto-connect on boot if stored credentials exist in NVS */
+  char saved_ssid[33] = {0};
+  char saved_pass[65] = {0};
+  if (load_wifi_credentials(saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass)))
+    {
+      ESP_LOGI(TAG, "Found stored Wi-Fi credentials for '%s', auto-connecting...", saved_ssid);
+      wifi_config_t wifi_cfg = {0};
+      memcpy(wifi_cfg.sta.ssid, saved_ssid, sizeof(wifi_cfg.sta.ssid));
+      memcpy(wifi_cfg.sta.password, saved_pass, sizeof(wifi_cfg.sta.password));
+      memset(saved_pass, 0, sizeof(saved_pass));
+      esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+      esp_wifi_connect();
+    }
 }
 
 /* Intercept write calls from linenoise to drop cursor position query (\x1b[6n).
@@ -1570,9 +1758,15 @@ static void register_commands(void)
       },
       {
           .command = "wifi_connect",
-          .help = "Connect to Wi-Fi access point",
-          .hint = "<ssid> [password]",
+          .help = "Connect to Wi-Fi (interactive masked password or NVS saved)",
+          .hint = "[<ssid>] [<password>]",
           .func = &cmd_wifi_connect,
+      },
+      {
+          .command = "wifi_forget",
+          .help = "Erase saved Wi-Fi credentials from NVS",
+          .hint = NULL,
+          .func = &cmd_wifi_forget,
       },
       {
           .command = "wifi_disconnect",

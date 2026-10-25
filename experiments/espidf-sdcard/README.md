@@ -33,8 +33,9 @@ Readline support provides command history with Up/Down arrows, in-line editing w
 - `mkdir <dirname>`: create directory
 - `df`: display storage capacity and usage for both `/sdcard` and `/data`
 - `wifi_scan`: scan 2.4 GHz channels and display visible access points
-- `wifi_connect <ssid> [password]`: connect to Wi-Fi access point and negotiate DHCP address
+- `wifi_connect [<ssid>] [<password>]`: connect to Wi-Fi with interactive masked password prompt; credentials persist in NVS and auto-connect on boot
 - `wifi_disconnect`: disconnect from active Wi-Fi network
+- `wifi_forget`: erase saved Wi-Fi credentials from NVS
 - `ifconfig`: display network interface status and IP address
 - `ping <host>`: send ICMP echo requests to network host
 - `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
@@ -62,5 +63,5 @@ Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `b
 Run `make -C experiments/espidf-sdcard/test test` inside the Nix dev shell.
 The tests use address and undefined-behavior sanitizers.
 They check path resolution, status rendering with long filenames, and loading long lines with LF or CRLF endings.
-Carriage returns inside a line and at the end of a file without a newline are preserved.
+Carriage returns inside a line, and at the end of a file without a newline is preserved.
 These fixes passed host tests; they have not been verified on the board.
