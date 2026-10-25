@@ -41,6 +41,9 @@ make shell
 > Run `make shell-pin` afterward to protect it from Nix garbage collection.
 > Espressif boards also need `make install` for esptool.
 
+> [!NOTE]
+> Serial port access needs membership in the `dialout` group (can be added by running `sudo usermod -aG dialout $USER`).
+
 #### 3. Build and run on the Pico 2
 
 ```shell
@@ -78,10 +81,6 @@ make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
 ```
 
-> [!NOTE]
-> Silicon revisions below v3.0 need `configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the NuttX revision check.
-> Serial port access needs membership in the `dialout` group (can be added by running `sudo usermod -aG dialout $USER`).
-
 #### 5. Build and run on the ESP32-S3
 
 ```shell
@@ -90,10 +89,6 @@ make espidf-install ESPIDF_TARGET=esp32s3
 make espidf-build ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_PORT=/dev/ttyACM0
 make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
-
-# Or idf-rs (Rust)
-make idfrs-build IDFRS_SRC=experiments/rgb-cycle
-make idfrs-flash IDFRS_PORT=/dev/ttyACM0
 ```
 
 ---
