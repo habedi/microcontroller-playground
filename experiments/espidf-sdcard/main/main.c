@@ -23,6 +23,7 @@
 #include "driver/sdmmc_host.h"
 #include "editor.h"
 #include "path_util.h"
+#include "retawq.h"
 #include "esp_app_format.h"
 #include "esp_chip_info.h"
 #include "esp_clk_tree.h"
@@ -756,6 +757,17 @@ static int cmd_cpuinfo(int argc, char **argv)
   printf("ISA Features:          FPU (Single-precision), Packed-SIMD DSP, 128-bit AI SIMD (PIE),\n"
          "                       Hardware Loops, Atomic (A), Compressed (C)\n");
   return 0;
+}
+
+static int cmd_retawq(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: retawq <url> or retawq --dump=<url>\n");
+      printf("Example: retawq http://example.com\n");
+      return 1;
+    }
+  return retawq_main(argc, (const char **)argv);
 }
 
 static int cmd_uname(int argc, char **argv)
@@ -1845,6 +1857,18 @@ static void register_commands(void)
           .help = "Send ICMP echo requests to network host",
           .hint = "<host_or_ip>",
           .func = &cmd_ping,
+      },
+      {
+          .command = "retawq",
+          .help = "Launch retawq text web browser (retawq <url> or retawq --dump=<url>)",
+          .hint = "<url>",
+          .func = &cmd_retawq,
+      },
+      {
+          .command = "browse",
+          .help = "Alias for retawq web browser",
+          .hint = "<url>",
+          .func = &cmd_retawq,
       },
       {
           .command = "ps",

@@ -40,6 +40,8 @@ Suggestions that exceed the console line limit are omitted.
 - `wifi_forget`: erase saved Wi-Fi credentials from NVS
 - `ifconfig`: display network interface status and IP address
 - `ping <host>`: send ICMP echo requests to network host
+- `retawq <url>`: launch the retawq text web browser (or `retawq --dump=<url>`)
+- `browse <url>`: alias for `retawq` web browser
 - `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
 - `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
