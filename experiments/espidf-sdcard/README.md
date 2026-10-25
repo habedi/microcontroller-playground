@@ -3,7 +3,7 @@
 ESP-IDF experiment providing an interactive NSH-compatible command shell on the Waveshare ESP32-P4-WIFI6 with dual filesystem storage (FATFS and LittleFS), wireless networking over SDIO, and an in-terminal text editor.
 
 - Board: Waveshare ESP32-P4-WIFI6, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Storage: 128 GB MicroSD card mounted at `/sdcard` (FATFS), plus 12 MB internal flash mounted at `/data` (LittleFS)
 - Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO Slot 1
 - Console: interactive REPL with `nsh> ` prompt on UART0

@@ -41,7 +41,7 @@ External code lives in git submodules under `external/` (fetch with `make submod
 - `external/nuttx`: Apache NuttX RTOS kernel and build system.
 - `external/nuttx-apps`: NuttX applications tree.
 - `external/pico-sdk`: Raspberry Pi Pico SDK (`PICO_SDK_PATH`).
-- `external/esp-idf`: Espressif IoT Development Framework (v5.5.5; `make espidf-install` places toolchains in `build/espressif`).
+- `external/esp-idf`: Espressif IoT Development Framework (v6.1.0; `make espidf-install` places toolchains in `build/espressif`).
 - `external/crosstool-ng`: Espressif crosstool-NG fallback toolchain.
 
 Submodules use `ignore = dirty` in `.gitmodules`. In JetBrains IDEs, map only the repository root under Settings, Version Control, Directory Mappings

@@ -4,7 +4,7 @@ Attempts to scan for Wi-Fi networks from the ESP32-P4, which has no radio of its
 onboard ESP32-C6 over SDIO.
 
 - Board: ESP32-P4 function EV board, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Result: working. Waveshare shipped the onboard ESP32-C6 with blank flash, which held the chip in a watchdog reboot loop. Flashing official Espressif ESP-Hosted SDIO slave firmware v3.0.10 through the `H4` UART pads established the SDIO link. Wi-Fi network scanning from the ESP32-P4 succeeds over SDIO at 40 MHz.
 
 

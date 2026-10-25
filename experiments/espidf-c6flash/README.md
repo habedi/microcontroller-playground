@@ -4,7 +4,7 @@ Asks whether the onboard ESP32-C6 answers its ROM loader over SDIO, which would 
 ESP32-P4 with no external hardware.
 
 - Board: ESP32-P4 function EV board, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Result: inconclusive. `esp_loader_connect()` times out, but the bootstrap pin the test used is an audio pin
   on this board, so download mode was never entered.
 

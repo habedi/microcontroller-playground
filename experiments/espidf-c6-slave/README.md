@@ -4,7 +4,7 @@ ESP-Hosted coprocessor firmware for the ESP32-C6 on the ESP32-P4 function EV boa
 on the radio chip and answers the P4 over SDIO.
 
 - Board: the ESP32-C6-MINI-1 module on the ESP32-P4 function EV board
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Result: builds, 640 KB application. Not yet flashed, because that needs a UART adapter on the `PROG_C6`
   header.
 
