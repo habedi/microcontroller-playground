@@ -65,6 +65,13 @@ static void test_slashes_and_normalization(void)
 
 static void test_buffer_limits(void)
 {
+  char untouched = 'x';
+  TEST_ASSERT(!path_resolve("/", "file", &untouched, 0));
+  TEST_ASSERT(untouched == 'x');
+  TEST_ASSERT(!path_resolve("/", "file", NULL, 0));
+  TEST_ASSERT(!path_resolve("/", "/", NULL, 0));
+  TEST_ASSERT(!path_resolve("/", "", NULL, 0));
+
   char out[8];
   /* Output "/sdcard" requires 8 bytes including null terminator */
   bool ok = path_resolve("/", "sdcard", out, sizeof(out));

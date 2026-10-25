@@ -10,6 +10,11 @@
 
 bool path_resolve(const char *cwd, const char *in, char *out, size_t out_len)
 {
+  if (out_len == 0)
+    {
+      return false;
+    }
+
   char combined[512];
   int n;
   if (!in || in[0] == '\0')

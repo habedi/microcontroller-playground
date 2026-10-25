@@ -56,3 +56,11 @@ make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard
 ```
 
 Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
+
+### Host Tests
+
+Run `make -C experiments/espidf-sdcard/test test` inside the Nix dev shell.
+The tests use address and undefined-behavior sanitizers.
+They check path resolution, status rendering with long filenames, and loading long lines with LF or CRLF endings.
+Carriage returns inside a line and at the end of a file without a newline are preserved.
+These fixes passed host tests; they have not been verified on the board.

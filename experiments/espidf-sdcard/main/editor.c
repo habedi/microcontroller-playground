@@ -244,12 +244,15 @@ static int editorOpenRows(const char *filename)
   while (fgets(line, sizeof(line), fp)) {
     int linelen = strlen(line);
     bool complete = linelen > 0 && line[linelen - 1] == '\n';
-    while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
-      linelen--;
+    if (complete) linelen--;
     if (continuing) {
       editorRowAppendString(&E.row[E.numrows - 1], line, linelen);
     } else {
       editorInsertRow(E.numrows, line, linelen);
+    }
+    erow *row = &E.row[E.numrows - 1];
+    if (complete && row->size > 0 && row->chars[row->size - 1] == '\r') {
+      row->chars[--row->size] = '\0';
     }
     continuing = !complete;
   }
@@ -340,7 +343,7 @@ static void editorDrawRows(struct abuf *ab)
 static void editorDrawStatusBar(struct abuf *ab)
 {
   abAppend(ab, "\x1b[7m", 4);
-  char status[80], rstatus[80];
+  char status[sizeof(E.filename) + 32], rstatus[80];
   int len = snprintf(status, sizeof(status), " %s %s",
                      E.filename[0] ? E.filename : "[No Name]",
                      E.dirty ? "(modified)" : "");
