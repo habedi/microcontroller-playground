@@ -343,7 +343,8 @@ espidf-build: ## Build an ESP-IDF project (ESPIDF_SRC=<dir>)
 		exit 1; }
 	bash -c 'export IDF_TOOLS_PATH=$(ESPIDF_TOOLS); \
 		. $(ESPIDF_DIR)/export.sh >/dev/null && \
-		if test -f $(ESPIDF_BUILD)/sdkconfig; then \
+		if test -f $(ESPIDF_BUILD)/sdkconfig && \
+		   grep -q "CONFIG_IDF_TARGET=\"$(ESPIDF_TARGET)\"" $(ESPIDF_BUILD)/sdkconfig; then \
 			idf.py $(ESPIDF_ARGS) build; \
 		else \
 			idf.py $(ESPIDF_ARGS) set-target $(ESPIDF_TARGET) build; \

@@ -66,3 +66,27 @@ CONFIG_SPIRAM_SPEED_80M=y
 # Route console output through the USB Serial/JTAG peripheral
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 ```
+
+### ESP-IDF C Firmware
+
+The repository includes ESP-IDF v6.1 in `external/esp-idf`. Toolchains are placed inside `build/espressif` to keep checkouts self-contained.
+
+1. Install the toolchain for ESP32-S3:
+
+```shell
+make espidf-install ESPIDF_TARGET=esp32s3
+```
+
+2. Build `experiments/espidf-hello`:
+
+```shell
+make espidf-build ESPIDF_TARGET=esp32s3
+```
+
+3. Flash and open the serial monitor:
+
+```shell
+make espidf-flash ESPIDF_PORT=/dev/ttyACM0
+make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
+```
+

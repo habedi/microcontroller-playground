@@ -1,10 +1,2 @@
-# Silicon revision v1.3 compatibility options.
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESP32P4_REV_MIN_100=y
-
-# Primary console on UART0 (onboard CH343 bridge); secondary on USB Serial/JTAG.
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
-
 # PSRAM disabled for this basic test (see experiments/espidf-psram).
 CONFIG_SPIRAM=n
