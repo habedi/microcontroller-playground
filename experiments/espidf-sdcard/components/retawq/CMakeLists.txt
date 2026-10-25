@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "init.c" "main.c" "parser.c" "resource.c" "stuff.c" "cursesbi.c"
     INCLUDE_DIRS "." "include"
-    REQUIRES vfs lwip esp_netif
+    REQUIRES vfs lwip esp_netif mbedtls
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE

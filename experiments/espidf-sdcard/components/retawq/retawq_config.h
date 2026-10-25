@@ -16,7 +16,7 @@
 #define OPTION_LOCAL_CGI 0
 #define OPTION_IPV6 0
 #define OPTION_BIRTCFG 0
-#define OPTION_TLS 0
+#define OPTION_TLS 5
 #define OPTION_EXECEXT 0
 #define OPTION_CED 1
 #define OPTION_THREADING 0

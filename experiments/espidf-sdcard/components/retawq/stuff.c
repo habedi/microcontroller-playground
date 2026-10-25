@@ -826,10 +826,29 @@ void fd_multiplex(void)
     }
 #endif
     fds_r = fds_e = fds_read; fds_w = fds_write;
+#if OPTION_TLS == TLS_MBEDTLS
+    /* Decrypted records may remain buffered after the socket stops being readable. */
+    fd_set pending;
+    struct timeval immediate = {0, 0};
+    int fd;
+    FD_ZERO(&pending);
+    for (fd = 0; fd <= highest_select_fd; fd++)
+    { if (FD_ISSET(fd, &fds_read) && resource_tls_pending(fd))
+      { FD_SET(fd, &pending); tovp = &immediate; }
+    }
+#endif
 #if USE_LWIP
     count = lwip_select(highest_select_fd + 1, &fds_r, &fds_w, &fds_e, tovp);
 #else
     count = select(highest_select_fd + 1, &fds_r, &fds_w, &fds_e, tovp);
+#endif
+#if OPTION_TLS == TLS_MBEDTLS
+    if (count >= 0)
+    { for (fd = 0; fd <= highest_select_fd; fd++)
+      { if (FD_ISSET(fd, &pending) && !FD_ISSET(fd, &fds_r))
+        { FD_SET(fd, &fds_r); count++; }
+      }
+    }
 #endif
 #if CONFIG_DEBUG
     { const int e = errno;

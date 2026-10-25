@@ -54,6 +54,21 @@ Suggestions that exceed the console line limit are omitted.
 - `reboot`: restart the board
 - `reset_c6`: pulse hardware reset to the ESP32-C6 coprocessor
 
+### HTTPS
+
+Retawq uses mbedTLS for HTTPS, with hostname and certificate date checks enabled.
+The ESP-IDF certificate bundle supplies trusted public root certificates.
+Use an explicit HTTPS URL:
+
+```text
+retawq https://example.com
+retawq --dump=https://example.com
+```
+
+The firmware starts SNTP through `pool.ntp.org` after Wi-Fi gets an IP address.
+If the clock is still unset, the browser command waits up to 15 seconds for synchronization.
+It returns an error if synchronization fails; certificate checks stay enabled.
+
 ### Build and Flash
 
 ```shell
@@ -74,3 +89,14 @@ The Wi-Fi credential fixes also passed an ESP32-P4 firmware build in the Nix dev
 Autocomplete tests use the parser and line editor from the `external/esp-idf` submodule.
 They cover quoted paths, escaped filenames, long prefixes, and accepting a completion followed by Backspace.
 The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.
+
+Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
+This target uses uv's `test` dependency group for mbedTLS's Python code generators.
+It builds the SDK's mbedTLS sources in `build/retawq-tls-test`, leaving the submodule unchanged.
+Local HTTPS servers check trusted certificates, expired certificates, untrusted certificates, hostname mismatches, and buffered records.
+The tests also check nonblocking read and write retries.
+Leak detection is disabled for these browser tests because retawq's existing teardown does not release all browser state.
+The HTTPS tests and ESP32-P4 firmware build passed.
+The image was flashed on the Waveshare ESP32-P4-WIFI6, and flash hash verification passed.
+The serial shell returned, but `wlan0` was down with no IP address.
+The HTTPS page dump failed during hostname lookup, so HTTPS on the board remains unverified.

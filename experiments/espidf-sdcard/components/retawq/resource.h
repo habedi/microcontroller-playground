@@ -417,6 +417,9 @@ extern tPortnumber rp2portnumber(tResourceProtocol);
 extern void rp2scheme(tResourceProtocol, /*@out@*/ char*);
 extern void resource_preplex(void);
 extern void resource_postplex(void);
+#if OPTION_TLS == TLS_MBEDTLS
+extern tBoolean resource_tls_pending(int fd);
+#endif
 extern void resource_request_start(tResourceRequest*);
 extern void resource_request_stop(tResourceRequest*);
 extern void resource_start_saving(tResource*, const tCantent*, int);

@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
@@ -35,6 +36,7 @@
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_psram.h"
@@ -767,6 +769,16 @@ static int cmd_retawq(int argc, char **argv)
       printf("Example: retawq http://example.com\n");
       printf("Note: Press 'q' then 'y' (or 'Q') to quit the interactive browser.\n");
       return 1;
+    }
+
+  if (s_wifi_connected && time(NULL) < 1704067200) /* January 2024 */
+    {
+      printf("Synchronizing the clock for HTTPS certificate checks...\n");
+      if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) != ESP_OK)
+        {
+          printf("Time synchronization failed. Check the network and try again.\n");
+          return 1;
+        }
     }
 
   const char *norm_argv[argc + 1];
@@ -1564,6 +1576,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
       ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
       printf("\n[Wi-Fi] Acquired IP address: " IPSTR "\n", IP2STR(&event->ip_info.ip));
       s_wifi_connected = true;
+      esp_netif_sntp_start();
       if (s_ip_sem)
         {
           xSemaphoreGive(s_ip_sem);
@@ -1603,6 +1616,9 @@ static void init_wifi(void)
       return;
     }
 
+  esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+  sntp.start = false;
+  ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp));
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_start();
   s_wifi_initialized = true;

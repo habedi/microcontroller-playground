@@ -785,6 +785,7 @@ extern void make_fd_cloexec(int);
 #define TLS_OPENSSL (2)
 #define TLS_MATRIX  (3)
 #define TLS_BUILTIN (4)
+#define TLS_MBEDTLS (5)
 
 #if OPTION_TLS
 #define strTls ", tls"
@@ -798,6 +799,8 @@ extern void make_fd_cloexec(int);
 #define strTLS "TLS (OpenSSL)"
 #elif OPTION_TLS == TLS_MATRIX
 #define strTLS "TLS (MatrixSSL)"
+#elif OPTION_TLS == TLS_MBEDTLS
+#define strTLS "TLS (mbedTLS)"
 #elif OPTION_TLS
 #define strTLS "TLS"
 #endif

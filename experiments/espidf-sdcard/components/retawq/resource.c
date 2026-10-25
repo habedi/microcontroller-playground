@@ -80,6 +80,20 @@ typedef ssl_t* tTlsSession;
 struct __tTlsSession;
 typedef struct __tTlsSession* tTlsSession;
 
+#elif OPTION_TLS == TLS_MBEDTLS
+
+#include "esp_crt_bundle.h"
+#include "mbedtls/net_sockets.h"
+#include "psa/crypto.h"
+#ifndef MBEDTLS_HAVE_TIME_DATE
+#error "retawq HTTPS requires certificate date validation"
+#endif
+typedef struct
+{ mbedtls_ssl_context ssl;
+  mbedtls_ssl_config config;
+  mbedtls_net_context socket;
+} *tTlsSession;
+
 #elif OPTION_TLS
 
 #error "Bad OPTION_TLS value"
@@ -1500,7 +1514,7 @@ typedef struct
    SSL_MAX_RECORD_LEN in MatrixSSL 1.2.1. Brain-damaged... */
 #endif
 
-#define NEED_CONNLIST (CONFIG_ABOUT & 1) /* "about:activity" needs it */
+#define NEED_CONNLIST ((CONFIG_ABOUT & 1) || (OPTION_TLS == TLS_MBEDTLS))
 
 typedef struct tConnection
 { tConnectAttemptData cad;
@@ -1838,6 +1852,11 @@ static void conn_remove(tConnection** _conn)
       (void) gnutls_deinit(session);
 #elif OPTION_TLS == TLS_OPENSSL
       SSL_free(session);
+#elif OPTION_TLS == TLS_MBEDTLS
+      mbedtls_ssl_free(&session->ssl);
+      mbedtls_ssl_config_free(&session->config);
+      /* conn_cleanup_fd owns the socket; mbedtls_net_free would close it twice. */
+      memory_deallocate(session);
 #elif OPTION_TLS == TLS_MATRIX
       tTlsMatrixCrutch* tmc = conn->tmc;
       matrixSslDeleteSession(session);
@@ -1917,6 +1936,12 @@ static one_caller void check_connect(tConnection* conn)
 
 static void conn_io_handler(void* data, tFdObservationFlags flags)
 { tConnection* conn = (tConnection*) data;
+#if OPTION_TLS == TLS_MBEDTLS
+  if ((conn->flags & cnfTlsDedication) && !(conn->flags & cnfTlsHandshaking))
+  { conn_callback(conn, (conn->flags & cnfWantToWrite) ? ccekWrite : ccekRead);
+    return;
+  }
+#endif
   if (flags & fdofRead) conn_callback(conn, ccekRead);
   else if (flags & fdofWrite)
   { if (conn->flags & cnfConnected) conn_callback(conn, ccekWrite);
@@ -2024,6 +2049,9 @@ static tTlsError tls_err2te(int err)
       retval = teHandshake; break;
 #elif OPTION_TLS == TLS_OPENSSL /* || .... */
     /* IMPLEMENTME for the other libraries? */
+#elif OPTION_TLS == TLS_MBEDTLS
+    case MBEDTLS_ERR_X509_CERT_VERIFY_FAILED: retval = teHandshake; break;
+    case MBEDTLS_ERR_SSL_ALLOC_FAILED: retval = teOom; break;
 #endif
     default: retval = teUnknown; break;
   }
@@ -2037,6 +2065,26 @@ static void tls_set_error(tConnection* conn, tTlsError te)
     if (resource->tls_error == teFine) resource->tls_error = te;
   }
 }
+
+#if OPTION_TLS == TLS_MBEDTLS
+static tBoolean tls_mbedtls_wait(tConnection* conn, int err)
+{ if (err == MBEDTLS_ERR_SSL_WANT_READ) conn_set_read(conn);
+  else if (err == MBEDTLS_ERR_SSL_WANT_WRITE) conn_set_write(conn);
+  else return(falsE);
+  return(truE);
+}
+
+tBoolean resource_tls_pending(int fd)
+{ tConnection* conn = connlist_head;
+  while (conn != NULL)
+  { if ( (conn->fd == fd) && (conn->flags & cnfReading) &&
+         conn_using_tls(conn) && (conn->tls_session != NULL) &&
+         mbedtls_ssl_check_pending(&conn->tls_session->ssl) ) return(truE);
+    conn = conn->next;
+  }
+  return(falsE);
+}
+#endif
 
 #if OPTION_TLS == TLS_GNUTLS
 
@@ -2315,6 +2363,9 @@ static one_caller tBoolean tls_initialize(void)
     if (err == 0) tls_is_usable = truE;
   }
 
+#elif OPTION_TLS == TLS_MBEDTLS
+  tls_is_usable = cond2boolean(psa_crypto_init() == PSA_SUCCESS);
+
 #endif
 
   out:
@@ -2358,6 +2409,12 @@ static unsigned char tls_do_handshaking(tConnection* conn)
 
 #elif OPTION_TLS == TLS_MATRIX
 
+
+#elif OPTION_TLS == TLS_MBEDTLS
+  int err = mbedtls_ssl_handshake(&session->ssl);
+  if (err == 0) retval = 2;
+  else if (tls_mbedtls_wait(conn, err)) retval = 1;
+  else { tls_set_error(conn, tls_err2te(err)); retval = 0; }
 
 #endif
 
@@ -2412,6 +2469,11 @@ static void tls_session_dissolver_callback(tConnection* conn,
     case ccekRead: case ccekWrite:
       if (tls_openssl_shutdown(conn)) goto do_dissolve;
       break;
+#elif OPTION_TLS == TLS_MBEDTLS
+    case ccekRead: case ccekWrite:
+      if (!tls_mbedtls_wait(conn, mbedtls_ssl_close_notify(&conn->tls_session->ssl)))
+        goto do_dissolve;
+      break;
 #elif OPTION_TLS == TLS_MATRIX
 #endif
     default: conn_bug(conn, ccek); do_dissolve: conn_do_dissolve(conn); break;
@@ -2433,6 +2495,10 @@ static tBoolean tls_session_dissolver(tConnection* conn)
 #elif OPTION_TLS == TLS_OPENSSL
   conn->flags &= ~cnfDataIsResource;
   retval = tls_openssl_shutdown(conn);
+#elif OPTION_TLS == TLS_MBEDTLS
+  conn->flags &= ~cnfDataIsResource;
+  retval = cond2boolean(!tls_mbedtls_wait(conn,
+    mbedtls_ssl_close_notify(&conn->tls_session->ssl)));
 #elif OPTION_TLS == TLS_MATRIX
 #endif
   if (!retval)
@@ -2456,7 +2522,7 @@ static tBoolean tls_session_init(tConnection* conn, const char* hostname)
 
   if (!tls_initialize())
   {
-#if (OPTION_TLS == TLS_OPENSSL) || (OPTION_TLS == TLS_MATRIX)
+#if (OPTION_TLS == TLS_OPENSSL) || (OPTION_TLS == TLS_MATRIX) || (OPTION_TLS == TLS_MBEDTLS)
     init_failed:
 #endif
     te = teInit; goto out;
@@ -2498,6 +2564,24 @@ static tBoolean tls_session_init(tConnection* conn, const char* hostname)
   err = matrixSslEncodeClientHello(session, &(conn->tmc->outgoing), 0);
   tls_matrix_debug_errvalue("client hello", err);
   if (err != 0) goto init_failed;
+
+#elif OPTION_TLS == TLS_MBEDTLS
+  session = conn->tls_session = memory_allocate(sizeof(*session), mapOther);
+  mbedtls_ssl_init(&session->ssl);
+  mbedtls_ssl_config_init(&session->config);
+  session->socket.fd = conn->fd;
+  if (mbedtls_ssl_config_defaults(&session->config, MBEDTLS_SSL_IS_CLIENT,
+        MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) != 0)
+    goto init_failed;
+  mbedtls_ssl_conf_authmode(&session->config, MBEDTLS_SSL_VERIFY_REQUIRED);
+  if (esp_crt_bundle_attach(&session->config) != 0) goto init_failed;
+  if (mbedtls_ssl_setup(&session->ssl, &session->config) != 0)
+    goto init_failed;
+  if (hostname == NULL || *hostname == '\0' ||
+      mbedtls_ssl_set_hostname(&session->ssl, hostname) != 0)
+    goto init_failed;
+  mbedtls_ssl_set_bio(&session->ssl, &session->socket,
+                      mbedtls_net_send, mbedtls_net_recv, NULL);
 
 #endif
 
@@ -2551,6 +2635,14 @@ static ssize_t tls_record_read(tConnection* conn, /*@out@*/ void* buf,
 #elif OPTION_TLS == TLS_MATRIX
 
 
+#elif OPTION_TLS == TLS_MBEDTLS
+  retval = mbedtls_ssl_read(&session->ssl, buf, size);
+  *_was_interrupted = tls_mbedtls_wait(conn, retval);
+  if (*_was_interrupted) retval = 0;
+  else if (retval == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) retval = 0;
+  else if (retval < 0) tls_set_error(conn, tls_err2te(retval));
+  else conn_set_read(conn);
+
 #endif
 
   return(retval);
@@ -2590,6 +2682,13 @@ static ssize_t tls_record_write(tConnection* conn, const void* buf,
 #elif OPTION_TLS == TLS_MATRIX
 
 
+#elif OPTION_TLS == TLS_MBEDTLS
+  retval = mbedtls_ssl_write(&session->ssl, buf, size);
+  *_was_interrupted = tls_mbedtls_wait(conn, retval);
+  if (*_was_interrupted) retval = 0;
+  else if (retval < 0) tls_set_error(conn, tls_err2te(retval));
+  else conn_set_write(conn);
+
 #endif
 
   return(retval);
@@ -2610,6 +2709,8 @@ static one_caller tBoolean tls_version_is_old(const char* version)
     { 1, 7, 3 }; /* MatrixSSL */
 #elif OPTION_TLS == TLS_BUILTIN
     { 1, 2, 1 }; /* libgcrypt */
+#elif OPTION_TLS == TLS_MBEDTLS
+    { 4, 0, 0 };
 #endif
   tBoolean retval = falsE;
   const char* temp = version;
