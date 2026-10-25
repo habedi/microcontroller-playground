@@ -10,23 +10,37 @@
  */
 
 #include <dirent.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "editor.h"
+#include "path_util.h"
+#include "retawq.h"
+#include "wget.h"
+#include "esp_app_format.h"
 #include "esp_chip_info.h"
+#include "esp_clk_tree.h"
+#include "esp_cpu.h"
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
+#include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
 #include "esp_wifi.h"
@@ -53,6 +67,7 @@
 
 #define SDCARD_MOUNT_POINT "/sdcard"
 #define LITTLEFS_MOUNT_POINT "/data"
+#define SHELL_MAX_CMDLINE 256
 
 static const char *TAG = "espidf_shell";
 
@@ -76,73 +91,20 @@ static void power_on_slot(void)
   vTaskDelay(pdMS_TO_TICKS(300));
 }
 
-static void resolve_path(const char *in, char *out, size_t out_len)
+static bool resolve_path(const char *in, char *out, size_t out_len)
 {
-  char combined[512];
-  if (!in || in[0] == '\0')
-    {
-      strncpy(out, s_cwd, out_len - 1);
-      out[out_len - 1] = '\0';
-      return;
-    }
+  return path_resolve(s_cwd, in, out, out_len);
+}
 
-  if (in[0] == '/')
+/* resolve_path for command arguments; prints an error on failure. */
+static bool resolve_arg(const char *cmd, const char *in, char *out, size_t out_len)
+{
+  if (resolve_path(in, out, out_len))
     {
-      strncpy(combined, in, sizeof(combined) - 1);
+      return true;
     }
-  else
-    {
-      snprintf(combined, sizeof(combined), "%s/%s", s_cwd, in);
-    }
-  combined[sizeof(combined) - 1] = '\0';
-
-  char segments[16][64];
-  int count = 0;
-
-  char copy[512];
-  strncpy(copy, combined, sizeof(copy) - 1);
-  copy[sizeof(copy) - 1] = '\0';
-
-  char *saveptr = NULL;
-  char *tok = strtok_r(copy, "/", &saveptr);
-  while (tok != NULL)
-    {
-      if (strcmp(tok, ".") == 0)
-        {
-          /* Current directory: skip */
-        }
-      else if (strcmp(tok, "..") == 0)
-        {
-          if (count > 0)
-            {
-              count--;
-            }
-        }
-      else if (strlen(tok) > 0)
-        {
-          if (count < 16)
-            {
-              strncpy(segments[count], tok, sizeof(segments[count]) - 1);
-              segments[count][sizeof(segments[count]) - 1] = '\0';
-              count++;
-            }
-        }
-      tok = strtok_r(NULL, "/", &saveptr);
-    }
-
-  if (count == 0)
-    {
-      strncpy(out, "/", out_len - 1);
-      out[out_len - 1] = '\0';
-      return;
-    }
-
-  out[0] = '\0';
-  for (int i = 0; i < count; i++)
-    {
-      strncat(out, "/", out_len - strlen(out) - 1);
-      strncat(out, segments[i], out_len - strlen(out) - 1);
-    }
+  printf("%s: path too long: %s\n", cmd, in);
+  return false;
 }
 
 static int cmd_pwd(int argc, char **argv)
@@ -153,21 +115,21 @@ static int cmd_pwd(int argc, char **argv)
 
 static int cmd_cd(int argc, char **argv)
 {
-  char target[512];
+  /* Same size as s_cwd so that a valid target always fits. */
+  char target[sizeof(s_cwd)];
   if (argc < 2)
     {
-      strncpy(target, SDCARD_MOUNT_POINT, sizeof(target));
+      snprintf(target, sizeof(target), "%s", SDCARD_MOUNT_POINT);
     }
-  else
+  else if (!resolve_arg("cd", argv[1], target, sizeof(target)))
     {
-      resolve_path(argv[1], target, sizeof(target));
+      return 1;
     }
 
   struct stat st;
   if (stat(target, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      strncpy(s_cwd, target, sizeof(s_cwd) - 1);
-      s_cwd[sizeof(s_cwd) - 1] = '\0';
+      memcpy(s_cwd, target, sizeof(s_cwd));
       return 0;
     }
   printf("cd: %s: No such directory\n", target);
@@ -179,7 +141,10 @@ static int cmd_ls(int argc, char **argv)
   char path[512];
   if (argc > 1)
     {
-      resolve_path(argv[1], path, sizeof(path));
+      if (!resolve_arg("ls", argv[1], path, sizeof(path)))
+        {
+          return 1;
+        }
     }
   else
     {
@@ -226,35 +191,63 @@ static int cmd_ls(int argc, char **argv)
   return 0;
 }
 
-static void tree_traverse(const char *base_path, int depth)
+static bool is_dot_entry(const char *name)
 {
-  if (depth > 5) return;
-  DIR *d = opendir(base_path);
-  if (!d) return;
+  return strcmp(name, ".") == 0 || strcmp(name, "..") == 0;
+}
 
+static int tree_count(const char *path)
+{
+  DIR *d = opendir(path);
+  if (!d) return 0;
+
+  int count = 0;
   struct dirent *entry;
-  char sub_path[1024];
-  struct stat st;
   while ((entry = readdir(d)) != NULL)
     {
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      if (!is_dot_entry(entry->d_name))
+        {
+          count++;
+        }
+    }
+  closedir(d);
+  return count;
+}
+
+/* path and prefix are shared buffers that each level extends and restores,
+ * so the stack frame stays small during recursion.
+ */
+static void tree_traverse(char *path, size_t path_cap, char *prefix, size_t prefix_cap, int depth)
+{
+  if (depth > 5) return;
+  int total = tree_count(path);
+  DIR *d = opendir(path);
+  if (!d) return;
+
+  size_t path_len = strlen(path);
+  size_t prefix_len = strlen(prefix);
+  struct dirent *entry;
+  struct stat st;
+  int index = 0;
+  while ((entry = readdir(d)) != NULL)
+    {
+      if (is_dot_entry(entry->d_name))
         {
           continue;
         }
-      for (int i = 0; i < depth; i++)
+      bool last = ++index >= total;
+      int n = snprintf(path + path_len, path_cap - path_len, "/%s", entry->d_name);
+      bool fits = n >= 0 && (size_t)n < path_cap - path_len;
+      bool is_dir = fits && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+
+      printf("%s%s %s%s\n", prefix, last ? "└──" : "├──", entry->d_name, is_dir ? "/" : "");
+      if (is_dir)
         {
-          printf("│   ");
+          snprintf(prefix + prefix_len, prefix_cap - prefix_len, "%s", last ? "    " : "│   ");
+          tree_traverse(path, path_cap, prefix, prefix_cap, depth + 1);
+          prefix[prefix_len] = '\0';
         }
-      snprintf(sub_path, sizeof(sub_path), "%s/%s", base_path, entry->d_name);
-      if (stat(sub_path, &st) == 0 && S_ISDIR(st.st_mode))
-        {
-          printf("├── %s/\n", entry->d_name);
-          tree_traverse(sub_path, depth + 1);
-        }
-      else
-        {
-          printf("├── %s\n", entry->d_name);
-        }
+      path[path_len] = '\0';
     }
   closedir(d);
 }
@@ -262,9 +255,13 @@ static void tree_traverse(const char *base_path, int depth)
 static int cmd_tree(int argc, char **argv)
 {
   char path[512];
+  char prefix[64] = "";
   if (argc > 1)
     {
-      resolve_path(argv[1], path, sizeof(path));
+      if (!resolve_arg("tree", argv[1], path, sizeof(path)))
+        {
+          return 1;
+        }
     }
   else
     {
@@ -273,7 +270,7 @@ static int cmd_tree(int argc, char **argv)
     }
 
   printf("%s\n", path);
-  tree_traverse(path, 0);
+  tree_traverse(path, sizeof(path), prefix, sizeof(prefix), 0);
   return 0;
 }
 
@@ -286,7 +283,10 @@ static int cmd_cat(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("cat", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   FILE *f = fopen(full_path, "r");
   if (!f)
@@ -315,7 +315,10 @@ static int cmd_write(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("write", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   FILE *f = fopen(full_path, "w");
   if (!f)
@@ -330,7 +333,12 @@ static int cmd_write(int argc, char **argv)
       if (i < argc - 1) fputc(' ', f);
     }
   fputc('\n', f);
-  fclose(f);
+  bool failed = ferror(f) != 0;
+  if (fclose(f) != 0 || failed)
+    {
+      printf("write: failed writing %s\n", full_path);
+      return 1;
+    }
   printf("Wrote to %s\n", full_path);
   return 0;
 }
@@ -345,18 +353,30 @@ static int cmd_cp(int argc, char **argv)
 
   char src[512];
   char dst[512];
-  resolve_path(argv[1], src, sizeof(src));
-  resolve_path(argv[2], dst, sizeof(dst));
+  if (!resolve_arg("cp", argv[1], src, sizeof(src)) ||
+      !resolve_arg("cp", argv[2], dst, sizeof(dst)))
+    {
+      return 1;
+    }
 
   struct stat st;
   if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      char *slash = strrchr(src, '/');
-      const char *basename = slash ? slash + 1 : src;
-      char dst_combined[1024];
-      snprintf(dst_combined, sizeof(dst_combined), "%s/%s", dst, basename);
-      strncpy(dst, dst_combined, sizeof(dst) - 1);
-      dst[sizeof(dst) - 1] = '\0';
+      const char *basename = strrchr(src, '/') + 1;
+      size_t len = strlen(dst);
+      int n = snprintf(dst + len, sizeof(dst) - len, "/%s", basename);
+      if (n < 0 || (size_t)n >= sizeof(dst) - len)
+        {
+          printf("cp: path too long: %s/%s\n", argv[2], basename);
+          return 1;
+        }
+    }
+
+  /* Opening the destination with "wb" would truncate the source first. */
+  if (strcmp(src, dst) == 0)
+    {
+      printf("cp: %s and %s are the same file\n", src, dst);
+      return 1;
     }
 
   FILE *in = fopen(src, "rb");
@@ -377,13 +397,23 @@ static int cmd_cp(int argc, char **argv)
   char buf[512];
   size_t n;
   size_t total = 0;
+  bool failed = false;
   while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
     {
-      fwrite(buf, 1, n, out);
+      if (fwrite(buf, 1, n, out) != n)
+        {
+          failed = true;
+          break;
+        }
       total += n;
     }
+  failed = failed || ferror(in) != 0;
   fclose(in);
-  fclose(out);
+  if (fclose(out) != 0 || failed)
+    {
+      printf("cp: failed after %zu bytes from %s to %s\n", total, src, dst);
+      return 1;
+    }
   printf("Copied %zu bytes from %s to %s\n", total, src, dst);
   return 0;
 }
@@ -397,7 +427,10 @@ static int cmd_rm(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("rm", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   if (unlink(full_path) == 0)
     {
@@ -417,7 +450,10 @@ static int cmd_mkdir(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("mkdir", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   if (mkdir(full_path, 0755) == 0)
     {
@@ -588,16 +624,16 @@ static int cmd_top(int argc, char **argv)
           snprintf(items[i].core, sizeof(items[i].core), "1");
         }
 
-      uint32_t task_time1 = 0;
+      /* A task created between samples has no baseline; show 0% for it. */
+      uint32_t task_delta = 0;
       for (UBaseType_t j = 0; j < task_count1; j++)
         {
           if (status1[j].xHandle == status2[i].xHandle)
             {
-              task_time1 = status1[j].ulRunTimeCounter;
+              task_delta = status2[i].ulRunTimeCounter - status1[j].ulRunTimeCounter;
               break;
             }
         }
-      uint32_t task_delta = status2[i].ulRunTimeCounter - task_time1;
       items[i].cpu_pct = ((float)task_delta * 100.0f) / (float)total_capacity;
       if (strncmp(items[i].name, "IDLE", 4) == 0)
         {
@@ -652,9 +688,153 @@ static int cmd_top(int argc, char **argv)
 
 static int cmd_free(int argc, char **argv)
 {
-  printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
-  printf("Minimum free heap: %lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
+  printf("%-17s %10s %10s %10s %10s\n", "Memory Tier", "Total", "Free", "Min Free", "Max Block");
+  printf("%-17s %10s %10s %10s %10s\n", "-----------", "-----", "----", "--------", "---------");
+
+  struct {
+    const char *name;
+    uint32_t caps;
+  } tiers[] = {
+    {"Internal SRAM",   MALLOC_CAP_INTERNAL},
+    {"DMA-capable",     MALLOC_CAP_DMA},
+    {"SPI RAM (PSRAM)", MALLOC_CAP_SPIRAM},
+  };
+
+  for (size_t i = 0; i < sizeof(tiers) / sizeof(tiers[0]); i++)
+    {
+      size_t total = heap_caps_get_total_size(tiers[i].caps);
+      size_t free_sz = heap_caps_get_free_size(tiers[i].caps);
+      size_t min_free = heap_caps_get_minimum_free_size(tiers[i].caps);
+      size_t max_block = heap_caps_get_largest_free_block(tiers[i].caps);
+
+      if (total > 0 || free_sz > 0 || tiers[i].caps == MALLOC_CAP_SPIRAM)
+        {
+          printf("%-17s %10zu %10zu %10zu %10zu\n",
+                 tiers[i].name, total, free_sz, min_free, max_block);
+        }
+    }
+
+  printf("\nOverall System Allocator:\n");
+  printf("  Total free:       %10lu bytes\n", (unsigned long)esp_get_free_heap_size());
+  printf("  Minimum free:     %10lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
+  printf("  Largest block:    %10zu bytes\n", heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+
+  if (esp_psram_is_initialized())
+    {
+      size_t psram_size = esp_psram_get_size();
+      printf("  PSRAM Physical:   %10zu bytes (%zu MB)\n", psram_size, psram_size / (1024 * 1024));
+    }
+  else
+    {
+      printf("  PSRAM Physical:   Disabled / Not initialized\n");
+    }
+
   return 0;
+}
+
+static int cmd_cpuinfo(int argc, char **argv)
+{
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+
+  uint32_t cpu_freq_hz = 0;
+  uint32_t apb_freq_hz = 0;
+  uint32_t xtal_freq_hz = 0;
+
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &cpu_freq_hz);
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &apb_freq_hz);
+  esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &xtal_freq_hz);
+
+  printf("CPU Architecture:      RISC-V 32-bit (RV32IMAFCP + Espressif PIE)\n");
+  printf("Target Chip:           ESP32-P4 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
+  printf("High-Performance Core: %d cores (Active Core ID: %d)\n", chip_info.cores, esp_cpu_get_core_id());
+  printf("Low-Power Core:        1 core (RV32IMC @ up to 40 MHz)\n");
+  printf("CPU Clock Frequency:   %lu MHz (XTAL: %lu MHz, APB: %lu MHz)\n",
+         (unsigned long)(cpu_freq_hz / 1000000),
+         (unsigned long)(xtal_freq_hz / 1000000),
+         (unsigned long)(apb_freq_hz / 1000000));
+  printf("Instruction Cache:     32 KB L1 I-Cache per HP core\n");
+  printf("Data Cache:            32 KB L1 D-Cache per HP core\n");
+  printf("L2 Unified Cache:      128 KB\n");
+  printf("Tightly Coupled RAM:   128 KB zero-wait-state HP TCM\n");
+  printf("ISA Features:          FPU (Single-precision), Packed-SIMD DSP, 128-bit AI SIMD (PIE),\n"
+         "                       Hardware Loops, Atomic (A), Compressed (C)\n");
+  return 0;
+}
+
+static bool sync_network_time(void)
+{
+  if (s_wifi_connected && time(NULL) < 1704067200) /* January 2024 */
+    {
+      printf("Synchronizing the clock for HTTPS certificate checks...\n");
+      if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) != ESP_OK)
+        {
+          printf("Time synchronization failed. Check the network and try again.\n");
+          return false;
+        }
+    }
+  return true;
+}
+
+static int cmd_wget(int argc, char **argv)
+{
+  if (argc != 4 || strcmp(argv[1], "-O") != 0)
+    {
+      printf("Usage: wget -O <file|-> <http(s)://url>\n");
+      return 1;
+    }
+  char path[512];
+  if (strcmp(argv[2], "-") == 0) strcpy(path, "-");
+  else if (!resolve_arg("wget", argv[2], path, sizeof(path))) return 1;
+  if (!sync_network_time()) return 1;
+  return wget_download(argv[3], path);
+}
+
+static int cmd_retawq(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: retawq <url> or retawq --dump=<url>\n");
+      printf("Example: retawq http://example.com\n");
+      printf("Note: Press 'q' then 'y' (or 'Q') to quit the interactive browser.\n");
+      return 1;
+    }
+
+  if (!sync_network_time()) return 1;
+
+  const char *norm_argv[argc + 1];
+  char url_buf[256];
+  norm_argv[0] = argv[0];
+
+  for (int i = 1; i < argc; i++)
+    {
+      const char *arg = argv[i];
+      if (strncmp(arg, "--dump=", 7) == 0)
+        {
+          const char *dump_url = arg + 7;
+          if (strstr(dump_url, "://") == NULL && strncmp(dump_url, "about:", 6) != 0 && dump_url[0] != '/')
+            {
+              snprintf(url_buf, sizeof(url_buf), "--dump=http://%s", dump_url);
+              norm_argv[i] = url_buf;
+            }
+          else
+            {
+              norm_argv[i] = arg;
+            }
+        }
+      else if (arg[0] != '-' && strstr(arg, "://") == NULL && strncmp(arg, "about:", 6) != 0 && arg[0] != '/' && arg[0] != '.')
+        {
+          snprintf(url_buf, sizeof(url_buf), "http://%s", arg);
+          norm_argv[i] = url_buf;
+        }
+      else
+        {
+          norm_argv[i] = arg;
+        }
+    }
+  norm_argv[argc] = NULL;
+
+  return retawq_main(argc, norm_argv);
 }
 
 static int cmd_uname(int argc, char **argv)
@@ -695,6 +875,279 @@ static int cmd_reset_c6(int argc, char **argv)
   return 0;
 }
 
+static const char *ota_state_str(esp_ota_img_states_t state)
+{
+  switch (state)
+    {
+      case ESP_OTA_IMG_NEW:             return "NEW";
+      case ESP_OTA_IMG_PENDING_VERIFY:  return "PENDING_VERIFY";
+      case ESP_OTA_IMG_VALID:           return "VALID";
+      case ESP_OTA_IMG_INVALID:         return "INVALID";
+      case ESP_OTA_IMG_ABORTED:         return "ABORTED";
+      case ESP_OTA_IMG_UNDEFINED:       return "UNDEFINED";
+      default:                          return "UNKNOWN";
+    }
+}
+
+static int cmd_ota_status(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  const esp_partition_t *boot = esp_ota_get_boot_partition();
+  const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+
+  printf("FOTA Partition & Rollback Status:\n");
+  printf("--------------------------------------------------\n");
+
+  if (running != NULL)
+    {
+      esp_app_desc_t app_desc;
+      esp_err_t err = esp_ota_get_partition_description(running, &app_desc);
+      esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+      esp_ota_get_state_partition(running, &state);
+
+      printf("Running Slot:       %s (0x%08lx, %lu KB)\n",
+             running->label, (unsigned long)running->address,
+             (unsigned long)(running->size / 1024));
+      printf("  State:            %s\n", ota_state_str(state));
+      if (err == ESP_OK)
+        {
+          printf("  Project Name:     %s\n", app_desc.project_name);
+          printf("  Version:          %s\n", app_desc.version);
+          printf("  Built:            %s %s\n", app_desc.date, app_desc.time);
+          printf("  IDF Version:      %s\n", app_desc.idf_ver);
+        }
+    }
+  else
+    {
+      printf("Running Slot:       Unknown\n");
+    }
+
+  if (boot != NULL)
+    {
+      printf("Configured Boot:    %s (0x%08lx)\n",
+             boot->label, (unsigned long)boot->address);
+    }
+
+  if (next != NULL)
+    {
+      esp_app_desc_t next_desc;
+      esp_err_t err = esp_ota_get_partition_description(next, &next_desc);
+      esp_ota_img_states_t next_state = ESP_OTA_IMG_UNDEFINED;
+      esp_ota_get_state_partition(next, &next_state);
+
+      printf("Next Update Target: %s (0x%08lx, %lu KB)\n",
+             next->label, (unsigned long)next->address,
+             (unsigned long)(next->size / 1024));
+      printf("  State:            %s\n", ota_state_str(next_state));
+      if (err == ESP_OK)
+        {
+          printf("  Existing Version: %s\n", next_desc.version);
+        }
+    }
+  else
+    {
+      printf("Next Update Target: None (no inactive OTA slot found)\n");
+    }
+
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+  printf("Rollback Support:   Enabled (automatic watchdog fallback)\n");
+#else
+  printf("Rollback Support:   Disabled\n");
+#endif
+
+  return 0;
+}
+
+static int cmd_ota_confirm(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (running != NULL)
+    {
+      esp_ota_get_state_partition(running, &state);
+    }
+
+  if (state == ESP_OTA_IMG_VALID)
+    {
+      printf("Firmware on %s is already marked VALID.\n",
+             running ? running->label : "current slot");
+      return 0;
+    }
+
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK)
+    {
+      printf("Firmware validated successfully! Rollback cancelled for %s.\n",
+             running ? running->label : "current slot");
+    }
+  else
+    {
+      printf("Failed to confirm firmware: %s\n", esp_err_to_name(err));
+    }
+  return 0;
+}
+
+static int cmd_ota_rollback(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  printf("Initiating voluntary rollback from %s...\n",
+         running ? running->label : "current slot");
+
+  esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
+  if (err != ESP_OK)
+    {
+      printf("Rollback failed: %s (is an alternate bootable image available?)\n",
+             esp_err_to_name(err));
+    }
+  return 0;
+}
+
+static int cmd_ota_update(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: ota_update <file_path>\n");
+      printf("Example: ota_update /sdcard/espidf_sdcard.bin\n");
+      return 1;
+    }
+
+  char full_path[512];
+  if (!resolve_arg("ota_update", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
+
+  FILE *f = fopen(full_path, "rb");
+  if (f == NULL)
+    {
+      printf("ota_update: cannot open '%s': %s\n", full_path, strerror(errno));
+      return 1;
+    }
+
+  fseek(f, 0, SEEK_END);
+  long file_size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (file_size <= 0)
+    {
+      printf("ota_update: file '%s' is empty\n", full_path);
+      fclose(f);
+      return 1;
+    }
+
+  const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+  if (update_partition == NULL)
+    {
+      printf("ota_update: no target OTA partition available\n");
+      fclose(f);
+      return 1;
+    }
+
+  if ((size_t)file_size > update_partition->size)
+    {
+      printf("ota_update: image size (%ld B) exceeds partition capacity (%lu B)\n",
+             file_size, (unsigned long)update_partition->size);
+      fclose(f);
+      return 1;
+    }
+
+  printf("Starting FOTA update:\n");
+  printf("  Source image:     %s (%ld bytes)\n", full_path, file_size);
+  printf("  Target slot:      %s (0x%08lx, %lu KB)\n",
+         update_partition->label, (unsigned long)update_partition->address,
+         (unsigned long)(update_partition->size / 1024));
+
+  esp_ota_handle_t ota_handle = 0;
+  esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: esp_ota_begin failed: %s\n", esp_err_to_name(err));
+      fclose(f);
+      return 1;
+    }
+
+  const size_t chunk_size = 4096;
+  char *buf = malloc(chunk_size);
+  if (buf == NULL)
+    {
+      printf("ota_update: failed to allocate %zu B buffer\n", chunk_size);
+      esp_ota_abort(ota_handle);
+      fclose(f);
+      return 1;
+    }
+
+  size_t bytes_written = 0;
+  int last_pct = -1;
+  while (bytes_written < (size_t)file_size)
+    {
+      size_t to_read = (size_t)file_size - bytes_written;
+      if (to_read > chunk_size)
+        {
+          to_read = chunk_size;
+        }
+
+      size_t read_bytes = fread(buf, 1, to_read, f);
+      if (read_bytes == 0)
+        {
+          break;
+        }
+
+      err = esp_ota_write(ota_handle, buf, read_bytes);
+      if (err != ESP_OK)
+        {
+          printf("\nota_update: esp_ota_write failed at %zu bytes: %s\n",
+                 bytes_written, esp_err_to_name(err));
+          free(buf);
+          esp_ota_abort(ota_handle);
+          fclose(f);
+          return 1;
+        }
+
+      bytes_written += read_bytes;
+      int pct = (int)((bytes_written * 100) / file_size);
+      if (pct != last_pct && (pct % 10 == 0 || pct == 100))
+        {
+          printf("  Flashing: %3d%% (%zu / %ld bytes)\r", pct, bytes_written, file_size);
+          fflush(stdout);
+          last_pct = pct;
+        }
+    }
+  printf("\n");
+  free(buf);
+  fclose(f);
+
+  if (bytes_written != (size_t)file_size)
+    {
+      printf("ota_update: read error, wrote %zu of %ld bytes\n", bytes_written, file_size);
+      esp_ota_abort(ota_handle);
+      return 1;
+    }
+
+  printf("Validating image SHA256 integrity...\n");
+  err = esp_ota_end(ota_handle);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: validation failed (corrupt image or bad SHA256): %s\n",
+             esp_err_to_name(err));
+      return 1;
+    }
+
+  err = esp_ota_set_boot_partition(update_partition);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: esp_ota_set_boot_partition failed: %s\n",
+             esp_err_to_name(err));
+      return 1;
+    }
+
+  printf("FOTA update completed successfully!\n");
+  printf("Next boot will launch '%s' in PENDING_VERIFY state.\n", update_partition->label);
+  printf("If new firmware fails to initialize, the bootloader will automatically roll back.\n");
+  printf("Type 'reboot' to restart into the new firmware.\n");
+
+  return 0;
+}
+
 static int cmd_nano(int argc, char **argv)
 {
   if (argc < 2)
@@ -704,7 +1157,10 @@ static int cmd_nano(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("nano", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
   return editor_open(full_path);
 }
 
@@ -741,10 +1197,17 @@ static int cmd_wifi_scan(int argc, char **argv)
 
   uint16_t found = 0;
   esp_wifi_scan_get_ap_num(&found);
+  if (found == 0)
+    {
+      printf("Found 0 networks\n");
+      return 0;
+    }
+
   uint16_t count = found > 20 ? 20 : found;
   wifi_ap_record_t *records = malloc(count * sizeof(wifi_ap_record_t));
   if (!records)
     {
+      esp_wifi_clear_ap_list();
       printf("wifi_scan: out of memory\n");
       return 1;
     }
@@ -765,6 +1228,112 @@ static int cmd_wifi_scan(int argc, char **argv)
   return 0;
 }
 
+static bool read_masked_password(char *buf, size_t max_len)
+{
+  size_t idx = 0;
+  fflush(stdout);
+
+  while (1)
+    {
+      int c = getchar();
+      if (c == EOF || c == 0)
+        {
+          vTaskDelay(pdMS_TO_TICKS(10));
+          continue;
+        }
+
+      if (c == '\r' || c == '\n')
+        {
+          printf("\n");
+          fflush(stdout);
+          buf[idx] = '\0';
+          return true;
+        }
+      else if (c == 0x08 || c == 0x7f) /* Backspace / Delete */
+        {
+          if (idx > 0)
+            {
+              idx--;
+              printf("\b \b");
+              fflush(stdout);
+            }
+        }
+      else if (c == 0x03) /* Ctrl+C */
+        {
+          printf("^C\n");
+          fflush(stdout);
+          memset(buf, 0, max_len);
+          return false;
+        }
+      else if (c >= 32 && c <= 126) /* Printable ASCII */
+        {
+          if (idx < max_len - 1)
+            {
+              buf[idx++] = (char)c;
+              putchar('*');
+              fflush(stdout);
+            }
+        }
+    }
+}
+
+static bool load_wifi_credentials(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READONLY, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+
+  err = nvs_get_str(handle, "ssid", ssid, &ssid_len);
+  if (err == ESP_OK)
+    {
+      err = nvs_get_str(handle, "password", pass, &pass_len);
+    }
+  nvs_close(handle);
+  return (err == ESP_OK && strlen(ssid) > 0);
+}
+
+static bool save_wifi_credentials(const char *ssid, const char *pass)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READWRITE, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+
+  err = nvs_set_str(handle, "ssid", ssid);
+  if (err == ESP_OK && pass != NULL)
+    {
+      err = nvs_set_str(handle, "password", pass);
+    }
+  if (err == ESP_OK)
+    {
+      err = nvs_commit(handle);
+    }
+  nvs_close(handle);
+  return (err == ESP_OK);
+}
+
+static bool clear_wifi_credentials(void)
+{
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open("wifi_cred", NVS_READWRITE, &handle);
+  if (err != ESP_OK)
+    {
+      return false;
+    }
+  err = nvs_erase_all(handle);
+  if (err == ESP_OK)
+    {
+      err = nvs_commit(handle);
+    }
+  nvs_close(handle);
+  return err == ESP_OK;
+}
+
 static int cmd_wifi_connect(int argc, char **argv)
 {
   if (!s_wifi_initialized)
@@ -773,24 +1342,58 @@ static int cmd_wifi_connect(int argc, char **argv)
       return 1;
     }
 
-  if (argc < 2)
+  char ssid[33] = {0};
+  char password[65] = {0};
+
+  if (argc == 1)
     {
-      printf("Usage: wifi_connect <ssid> [password]\n");
-      return 1;
+      /* No arguments: connect using saved NVS credentials */
+      if (!load_wifi_credentials(ssid, sizeof(ssid), password, sizeof(password)))
+        {
+          printf("No saved Wi-Fi credentials found in NVS.\n");
+          printf("Usage: wifi_connect [ssid] [password]\n");
+          return 1;
+        }
+      printf("Using saved credentials for '%s'\n", ssid);
+    }
+  else
+    {
+      if (strlen(argv[1]) >= sizeof(ssid) ||
+          (argc >= 3 && strlen(argv[2]) >= sizeof(password)))
+        {
+          printf("SSID or password is too long.\n");
+          return 1;
+        }
+      strncpy(ssid, argv[1], sizeof(ssid) - 1);
+
+      if (argc >= 3)
+        {
+          /* Password passed directly as argument */
+          strncpy(password, argv[2], sizeof(password) - 1);
+        }
+      else
+        {
+          /* Interactive masked password prompt */
+          printf("Enter password for '%s' (masked): ", ssid);
+          if (!read_masked_password(password, sizeof(password)))
+            {
+              return 1;
+            }
+        }
     }
 
   wifi_config_t wifi_cfg = {0};
-  strncpy((char *)wifi_cfg.sta.ssid, argv[1], sizeof(wifi_cfg.sta.ssid) - 1);
-  if (argc >= 3)
-    {
-      strncpy((char *)wifi_cfg.sta.password, argv[2], sizeof(wifi_cfg.sta.password) - 1);
-    }
+  memcpy(wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid));
+  memcpy(wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password));
 
   esp_wifi_disconnect();
   s_wifi_connected = false;
   esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
 
-  printf("Connecting to %s...\n", argv[1]);
+  /* Drop any token left by an earlier attempt */
+  xSemaphoreTake(s_ip_sem, 0);
+
+  printf("Connecting to %s...\n", ssid);
   esp_wifi_connect();
 
   if (xSemaphoreTake(s_ip_sem, pdMS_TO_TICKS(15000)) == pdTRUE)
@@ -799,13 +1402,38 @@ static int cmd_wifi_connect(int argc, char **argv)
       esp_netif_get_ip_info(s_sta_netif, &ip_info);
       printf("Connected successfully! IP: " IPSTR ", Gateway: " IPSTR "\n",
              IP2STR(&ip_info.ip), IP2STR(&ip_info.gw));
+
+      /* Save credentials to NVS so they persist across restart */
+      if (save_wifi_credentials(ssid, password))
+        {
+          printf("Credentials saved securely to NVS (will auto-connect on boot).\n");
+        }
+
+      /* Clean sensitive password buffers */
+      memset(password, 0, sizeof(password));
+      memset(&wifi_cfg, 0, sizeof(wifi_cfg));
       return 0;
     }
   else
     {
-      printf("Connection timed out.\n");
+      printf("Connection timed out. Check SSID and password.\n");
+      memset(password, 0, sizeof(password));
+      memset(&wifi_cfg, 0, sizeof(wifi_cfg));
       return 1;
     }
+}
+
+static int cmd_wifi_forget(int argc, char **argv)
+{
+  if (clear_wifi_credentials())
+    {
+      esp_wifi_disconnect();
+      s_wifi_connected = false;
+      printf("Saved Wi-Fi credentials erased from NVS.\n");
+      return 0;
+    }
+  printf("Failed to erase Wi-Fi credentials.\n");
+  return 1;
 }
 
 static int cmd_wifi_disconnect(int argc, char **argv)
@@ -832,12 +1460,26 @@ static int cmd_ifconfig(int argc, char **argv)
   esp_netif_ip_info_t ip_info;
   esp_netif_get_ip_info(s_sta_netif, &ip_info);
 
-  uint8_t mac[6] = {0};
-  esp_wifi_get_mac(WIFI_IF_STA, mac);
+  esp_ip4_addr_t broadcast = {
+      .addr = ip_info.ip.addr | ~ip_info.netmask.addr,
+  };
 
   printf("wlan0: flags=%s\n", s_wifi_connected ? "UP,CONNECTED" : "DOWN");
   printf("       inet " IPSTR " netmask " IPSTR " broadcast " IPSTR "\n",
-         IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&ip_info.gw));
+         IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&broadcast));
+  printf("       gateway " IPSTR "\n", IP2STR(&ip_info.gw));
+
+  char saved_ssid[33] = {0};
+  char dummy_pass[65] = {0};
+  if (load_wifi_credentials(saved_ssid, sizeof(saved_ssid), dummy_pass, sizeof(dummy_pass)))
+    {
+      printf("       saved_network: \"%s\" (in NVS)\n", saved_ssid);
+      memset(dummy_pass, 0, sizeof(dummy_pass));
+    }
+  else
+    {
+      printf("       saved_network: none\n");
+    }
   return 0;
 }
 
@@ -906,6 +1548,11 @@ static int cmd_ping(int argc, char **argv)
   freeaddrinfo(res);
 
   SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+  if (!sem)
+    {
+      printf("ping: out of memory\n");
+      return 1;
+    }
   esp_ping_config_t ping_config = ESP_PING_DEFAULT_CONFIG();
   ping_config.target_addr = target_addr;
   ping_config.count = 4;
@@ -950,6 +1597,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
       ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
       printf("\n[Wi-Fi] Acquired IP address: " IPSTR "\n", IP2STR(&event->ip_info.ip));
       s_wifi_connected = true;
+      esp_netif_sntp_start();
       if (s_ip_sem)
         {
           xSemaphoreGive(s_ip_sem);
@@ -989,10 +1637,27 @@ static void init_wifi(void)
       return;
     }
 
+  esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+  sntp.start = false;
+  ESP_ERROR_CHECK(esp_netif_sntp_init(&sntp));
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_start();
   s_wifi_initialized = true;
   ESP_LOGI(TAG, "Wi-Fi radio is up and ready");
+
+  /* Auto-connect on boot if stored credentials exist in NVS */
+  char saved_ssid[33] = {0};
+  char saved_pass[65] = {0};
+  if (load_wifi_credentials(saved_ssid, sizeof(saved_ssid), saved_pass, sizeof(saved_pass)))
+    {
+      ESP_LOGI(TAG, "Found stored Wi-Fi credentials for '%s', auto-connecting...", saved_ssid);
+      wifi_config_t wifi_cfg = {0};
+      memcpy(wifi_cfg.sta.ssid, saved_ssid, sizeof(wifi_cfg.sta.ssid));
+      memcpy(wifi_cfg.sta.password, saved_pass, sizeof(wifi_cfg.sta.password));
+      memset(saved_pass, 0, sizeof(saved_pass));
+      esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+      esp_wifi_connect();
+    }
 }
 
 /* Intercept write calls from linenoise to drop cursor position query (\x1b[6n).
@@ -1013,65 +1678,100 @@ ssize_t __wrap_write(int fd, const void *buf, size_t count)
   return __real_write(fd, buf, count);
 }
 
+static void add_path_completion(const char *buf, size_t prefix_len,
+                                const char *path, linenoiseCompletions *lc)
+{
+  /* linenoise reserves one byte, then uses that reduced size for snprintf. */
+  char completion[SHELL_MAX_CMDLINE - 1];
+  if (prefix_len >= sizeof(completion)) return;
+  memcpy(completion, buf, prefix_len);
+  size_t len = prefix_len;
+
+  for (const char *p = path; *p; p++)
+    {
+      bool escape = *p == ' ' || *p == '\\' || *p == '"';
+      if (len + (escape ? 2 : 1) >= sizeof(completion)) return;
+      if (escape) completion[len++] = '\\';
+      completion[len++] = *p;
+    }
+  completion[len] = '\0';
+  linenoiseAddCompletion(lc, completion);
+}
+
 static void custom_completion(const char *buf, linenoiseCompletions *lc)
 {
-  if (!buf) return;
+  if (!buf || strlen(buf) >= SHELL_MAX_CMDLINE) return;
 
-  /* If command has no space yet, complete command names */
-  if (strchr(buf, ' ') == NULL)
+  const char *arg = buf;
+  bool in_arg = false, quoted = false, escaped = false;
+  size_t completed = 0;
+  for (const char *p = buf; *p; p++)
+    {
+      if (escaped)
+        {
+          escaped = false;
+          continue;
+        }
+      if (!in_arg)
+        {
+          arg = p;
+          if (*p == ' ')
+            {
+              arg = p + 1;
+              continue;
+            }
+          in_arg = true;
+          quoted = *p == '"';
+          if (quoted) continue;
+        }
+      if (*p == '\\') escaped = true;
+      else if ((quoted && *p == '"') || (!quoted && *p == ' '))
+        {
+          in_arg = false;
+          quoted = false;
+          completed++;
+          if (*p == ' ') arg = p + 1;
+        }
+    }
+
+  if (completed == 0)
     {
       esp_console_get_completion(buf, lc);
       return;
     }
 
-  /* Command has a space: complete file path argument */
-  const char *last_space = strrchr(buf, ' ');
-  const char *arg = last_space + 1;
-
-  char prefix_cmd[512];
-  size_t pfx_len = arg - buf;
-  if (pfx_len >= sizeof(prefix_cmd)) return;
-  strncpy(prefix_cmd, buf, pfx_len);
-  prefix_cmd[pfx_len] = '\0';
+  char path[SHELL_MAX_CMDLINE];
+  strcpy(path, arg);
+  char *args[2];
+  esp_console_split_argv(path, args, 2);
 
   char dir_to_open[512];
-  char match_prefix[128] = "";
-
-  const char *last_slash = strrchr(arg, '/');
+  char *last_slash = strrchr(path, '/');
+  const char *match_prefix = last_slash ? last_slash + 1 : path;
   if (last_slash)
     {
-      char dir_part[512];
-      size_t dlen = last_slash - arg;
-      if (dlen == 0)
-        {
-          strncpy(dir_part, "/", sizeof(dir_part));
-        }
-      else
-        {
-          strncpy(dir_part, arg, dlen);
-          dir_part[dlen] = '\0';
-        }
-      resolve_path(dir_part, dir_to_open, sizeof(dir_to_open));
-      strncpy(match_prefix, last_slash + 1, sizeof(match_prefix) - 1);
+      *last_slash = '\0';
+      bool ok = resolve_path(last_slash == path ? "/" : path,
+                             dir_to_open, sizeof(dir_to_open));
+      *last_slash = '/';
+      if (!ok) return;
     }
   else
     {
-      strncpy(dir_to_open, s_cwd, sizeof(dir_to_open) - 1);
-      strncpy(match_prefix, arg, sizeof(match_prefix) - 1);
+      strcpy(dir_to_open, s_cwd);
     }
 
-  /* Root '/' is not a physical directory in ESP-IDF VFS; supply mounted filesystems */
+  /* ESP-IDF VFS has no physical root directory to enumerate. */
   if (strcmp(dir_to_open, "/") == 0)
     {
       const char *mounts[] = { "sdcard", "data" };
-      size_t match_len = strlen(match_prefix);
       for (size_t m = 0; m < sizeof(mounts) / sizeof(mounts[0]); m++)
         {
-          if (strncmp(mounts[m], match_prefix, match_len) == 0)
+          if (strncmp(mounts[m], match_prefix, strlen(match_prefix)) == 0)
             {
-              char completion[1536];
-              snprintf(completion, sizeof(completion), "%s/%s/", prefix_cmd, mounts[m]);
-              linenoiseAddCompletion(lc, completion);
+              char candidate[16];
+              snprintf(candidate, sizeof(candidate), "/%s/", mounts[m]);
+              add_path_completion(buf, arg - buf, candidate, lc);
             }
         }
       return;
@@ -1087,26 +1787,18 @@ static void custom_completion(const char *buf, linenoiseCompletions *lc)
       if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
       if (strncmp(de->d_name, match_prefix, match_len) == 0)
         {
-          char completion[1536];
-          char path_prefix[512] = "";
-          if (last_slash)
-            {
-              size_t dlen = last_slash - arg + 1;
-              strncpy(path_prefix, arg, dlen);
-              path_prefix[dlen] = '\0';
-            }
-          snprintf(completion, sizeof(completion), "%s%s%s", prefix_cmd, path_prefix, de->d_name);
-
-          /* Check if directory to append '/' */
           char full_test[1024];
           snprintf(full_test, sizeof(full_test), "%s/%s", dir_to_open, de->d_name);
           struct stat st;
-          if (stat(full_test, &st) == 0 && S_ISDIR(st.st_mode))
+          bool directory = stat(full_test, &st) == 0 && S_ISDIR(st.st_mode);
+          char candidate[512];
+          int len = snprintf(candidate, sizeof(candidate), "%.*s%s%s",
+                             last_slash ? (int)(last_slash - path + 1) : 0,
+                             path, de->d_name, directory ? "/" : "");
+          if (len >= 0 && (size_t)len < sizeof(candidate))
             {
-              strncat(completion, "/", sizeof(completion) - strlen(completion) - 1);
+              add_path_completion(buf, arg - buf, candidate, lc);
             }
-
-          linenoiseAddCompletion(lc, completion);
         }
     }
   closedir(d);
@@ -1209,9 +1901,15 @@ static void register_commands(void)
       },
       {
           .command = "wifi_connect",
-          .help = "Connect to Wi-Fi access point",
-          .hint = "<ssid> [password]",
+          .help = "Connect to Wi-Fi (interactive masked password or NVS saved)",
+          .hint = "[<ssid>] [<password>]",
           .func = &cmd_wifi_connect,
+      },
+      {
+          .command = "wifi_forget",
+          .help = "Erase saved Wi-Fi credentials from NVS",
+          .hint = NULL,
+          .func = &cmd_wifi_forget,
       },
       {
           .command = "wifi_disconnect",
@@ -1232,6 +1930,24 @@ static void register_commands(void)
           .func = &cmd_ping,
       },
       {
+          .command = "retawq",
+          .help = "Launch retawq text web browser (retawq <url> or retawq --dump=<url>)",
+          .hint = "<url>",
+          .func = &cmd_retawq,
+      },
+      {
+          .command = "wget",
+          .help = "Download an HTTP or HTTPS URL to a file or standard output",
+          .hint = "-O <file|-> <url>",
+          .func = &cmd_wget,
+      },
+      {
+          .command = "browse",
+          .help = "Alias for retawq web browser",
+          .hint = "<url>",
+          .func = &cmd_retawq,
+      },
+      {
           .command = "ps",
           .help = "Show FreeRTOS tasks",
           .hint = NULL,
@@ -1248,6 +1964,36 @@ static void register_commands(void)
           .help = "Show OS and chip information",
           .hint = NULL,
           .func = &cmd_uname,
+      },
+      {
+          .command = "cpuinfo",
+          .help = "Show CPU architecture, clock frequencies, and cache specifications",
+          .hint = NULL,
+          .func = &cmd_cpuinfo,
+      },
+      {
+          .command = "ota_status",
+          .help = "Show FOTA partition and rollback status",
+          .hint = NULL,
+          .func = &cmd_ota_status,
+      },
+      {
+          .command = "ota_confirm",
+          .help = "Confirm new firmware and cancel rollback",
+          .hint = NULL,
+          .func = &cmd_ota_confirm,
+      },
+      {
+          .command = "ota_rollback",
+          .help = "Roll back to previous firmware and reboot",
+          .hint = NULL,
+          .func = &cmd_ota_rollback,
+      },
+      {
+          .command = "ota_update",
+          .help = "Flash new firmware from file to alternate OTA slot",
+          .hint = "<file_path>",
+          .func = &cmd_ota_update,
       },
       {
           .command = "reboot",
@@ -1338,8 +2084,9 @@ void app_main(void)
   esp_console_repl_t *repl = NULL;
   esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
   repl_config.prompt = "nsh> ";
-  repl_config.max_cmdline_length = 256;
-  repl_config.task_stack_size = 8192;
+  repl_config.max_cmdline_length = SHELL_MAX_CMDLINE;
+  /* Leave room for filesystem completion and command handlers. */
+  repl_config.task_stack_size = 16384;
 
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
@@ -1350,11 +2097,38 @@ void app_main(void)
 
   register_commands();
 
+  /* 5. Check and validate FOTA running partition state */
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t ota_state = ESP_OTA_IMG_UNDEFINED;
+  if (running != NULL && esp_ota_get_state_partition(running, &ota_state) == ESP_OK)
+    {
+      if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
+        {
+          ESP_LOGW(TAG, "Firmware on %s is in PENDING_VERIFY state.", running->label);
+          ESP_LOGI(TAG, "Self-tests and hardware initialization passed.");
+          esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
+          if (ota_err == ESP_OK)
+            {
+              ESP_LOGI(TAG, "Firmware marked VALID; rollback cancelled.");
+            }
+          else
+            {
+              ESP_LOGE(TAG, "Failed to mark app valid: %s", esp_err_to_name(ota_err));
+            }
+        }
+      else
+        {
+          ESP_LOGI(TAG, "Running firmware slot: %s (state: %d)",
+                   running->label, (int)ota_state);
+        }
+    }
+
   printf("\n");
   printf("====================================================\n");
   printf("  ESP32-P4 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
   printf("  Storage: /sdcard (FATFS), /data (LittleFS)\n");
   printf("  Network: Wi-Fi STA via ESP32-C6 coprocessor\n");
+  printf("  FOTA:    Rolling-Rollback (ota_status, ota_update, ota_rollback)\n");
   printf("  Editor:  nano <file> / edit <file>\n");
   printf("  Type 'help' to list available commands\n");
   printf("====================================================\n\n");

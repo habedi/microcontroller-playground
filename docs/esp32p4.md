@@ -6,7 +6,7 @@ onboard ESP32-C6 wireless coprocessor.
 ### Status
 
 The board runs both stacks. NuttX reaches an interactive NuttShell prompt when the console is on UART0, read
-over the board's onboard CH343 bridge, and ESP-IDF v5.5.5 runs and prints over the same cable. The saved
+over the board's onboard CH343 bridge, and ESP-IDF v6.1 runs and prints over the same cable. The saved
 configuration is `configs/nuttx/esp32p4-function-ev-board/nsh-rev1`.
 
 Only the USB Serial/JTAG console is broken. The `usbconsole` configuration still stops while attaching the
@@ -144,7 +144,7 @@ option off holds no symbols. A clean rebuild with it on fixes the link properly.
 
 ### PSRAM Works
 
-The 32 MB of PSRAM works on this board at up to 200 MHz, tested under ESP-IDF v5.5.5 by
+The 32 MB of PSRAM works on this board at up to 200 MHz, tested under ESP-IDF v6.1 by
 [../experiments/espidf-psram](../experiments/espidf-psram). It needs no settings beyond the two revision
 options, because `CONFIG_SPIRAM=y` and the 200 MHz default are enough:
 
@@ -179,7 +179,7 @@ only voltage, and `ESP_LDO_RESERVE_PSRAM` defaults to enabled, so nothing needs 
 
 ### ESP-IDF Runs on This Board
 
-ESP-IDF v5.5.5 is a submodule at `external/esp-idf`, with `espidf-` prefixed Makefile targets and a smallest
+ESP-IDF v6.1 is a submodule at `external/esp-idf`, with `espidf-` prefixed Makefile targets and a smallest
 program at [../experiments/espidf-hello](../experiments/espidf-hello). It builds, flashes, and runs. The
 console output over the CH343 bridge:
 

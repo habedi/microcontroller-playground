@@ -3,7 +3,7 @@
 ESP-IDF experiment providing an interactive NSH-compatible command shell on the Waveshare ESP32-P4-WIFI6 with dual filesystem storage (FATFS and LittleFS), wireless networking over SDIO, and an in-terminal text editor.
 
 - Board: Waveshare ESP32-P4-WIFI6, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Storage: 128 GB MicroSD card mounted at `/sdcard` (FATFS), plus 12 MB internal flash mounted at `/data` (LittleFS)
 - Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO Slot 1
 - Console: interactive REPL with `nsh> ` prompt on UART0
@@ -18,6 +18,8 @@ ESP-IDF experiment providing an interactive NSH-compatible command shell on the 
 
 The firmware runs `esp_console` on UART0 with prompt `nsh> `.
 Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
+Path completion accepts quoted or escaped spaces and escapes suggested filenames for the command parser.
+Suggestions that exceed the console line limit are omitted.
 
 - `help`: list available commands
 - `pwd`: print current working directory
@@ -33,16 +35,59 @@ Readline support provides command history with Up/Down arrows, in-line editing w
 - `mkdir <dirname>`: create directory
 - `df`: display storage capacity and usage for both `/sdcard` and `/data`
 - `wifi_scan`: scan 2.4 GHz channels and display visible access points
-- `wifi_connect <ssid> [password]`: connect to Wi-Fi access point and negotiate DHCP address
+- `wifi_connect [<ssid>] [<password>]`: connect to Wi-Fi with interactive masked password prompt; credentials persist in NVS and auto-connect on boot
 - `wifi_disconnect`: disconnect from active Wi-Fi network
+- `wifi_forget`: erase saved Wi-Fi credentials from NVS
 - `ifconfig`: display network interface status and IP address
 - `ping <host>`: send ICMP echo requests to network host
+- `retawq <url>`: launch the retawq text web browser (or `retawq --dump=<url>`)
+- `browse <url>`: alias for `retawq` web browser
+- `wget -O <file|-> <url>`: download an HTTP or HTTPS URL to a file, or print its body with `-O -`
 - `ps`: list running FreeRTOS tasks with priority, state, stack margin, and core affinity
 - `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
 - `uname`: display operating system, chip revision, and core count
+- `cpuinfo`: display CPU architecture, clock frequencies, caches, and hardware features
+- `ota_status`: display active partition slot, firmware version, and rollback state
+- `ota_confirm`: confirm new firmware as valid and cancel rollback
+- `ota_rollback`: roll back to the previous firmware slot and reboot
+- `ota_update <file>`: flash firmware binary from storage to alternate OTA slot
 - `reboot`: restart the board
 - `reset_c6`: pulse hardware reset to the ESP32-C6 coprocessor
+
+### HTTPS
+
+Retawq uses mbedTLS for HTTPS, with hostname and certificate date checks enabled.
+The ESP-IDF certificate bundle supplies trusted public root certificates.
+Cross-signed certificate verification is enabled for chains such as Google's.
+ECDSA signature verification runs in software because the hardware peripheral is unavailable on silicon revision v1.3.
+Use an explicit HTTPS URL:
+
+```text
+retawq https://example.com
+retawq --dump=https://example.com
+```
+
+The firmware starts SNTP through `pool.ntp.org` after Wi-Fi gets an IP address.
+If the clock is still unset, the browser command waits up to 15 seconds for synchronization.
+It returns an error if synchronization fails; certificate checks stay enabled.
+
+### File Downloads
+
+The `wget` command uses ESP-IDF's HTTP client, follows redirects, and verifies HTTPS certificates.
+The `-O` output argument and an explicit HTTP or HTTPS URL are required.
+Relative output paths use the shell's current directory.
+
+```text
+wget -O /data/example.html https://example.com
+wget -O - https://example.com
+```
+
+Downloads stream to a temporary file and are published only after the response is complete.
+Network errors, HTTP error responses, and write failures leave an existing destination unchanged.
+On the SD card, use a new output filename or remove the old file first: FATFS does not replace files during rename.
+Console output streams directly and can contain a partial response if the request fails.
+This command implements only the `-O` download form.
 
 ### Build and Flash
 
@@ -52,3 +97,31 @@ make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard
 ```
 
 Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
+
+### Host Tests
+
+Run `make -C experiments/espidf-sdcard/test test` inside the Nix dev shell.
+The tests use address and undefined-behavior sanitizers.
+They check path resolution, status rendering with long filenames, and loading long lines with LF or CRLF endings.
+Carriage returns inside a line, and at the end of a file without a newline is preserved.
+These fixes passed host tests; they have not been verified on the board.
+The Wi-Fi credential fixes also passed an ESP32-P4 firmware build in the Nix dev shell.
+Autocomplete tests use the parser and line editor from the `external/esp-idf` submodule.
+They cover quoted paths, escaped filenames, long prefixes, and accepting a completion followed by Backspace.
+The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.
+Download tests cover binary bodies, redirects, incomplete transfers, HTTP errors, and output failures.
+The `wget` host tests and ESP32-P4 firmware build passed; the new command has not been flashed or verified on hardware.
+
+Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
+This target uses uv's `test` dependency group for mbedTLS's Python code generators.
+It builds the SDK's mbedTLS sources in `build/retawq-tls-test`, leaving the submodule unchanged.
+Local HTTPS servers check trusted certificates, expired certificates, untrusted certificates, hostname mismatches, and buffered records.
+The tests also check nonblocking read and write retries.
+Leak detection is disabled for these browser tests because retawq's existing teardown does not release all browser state.
+The HTTPS tests and ESP32-P4 firmware build passed.
+The image was flashed on the Waveshare ESP32-P4-WIFI6, and flash hash verification passed.
+The serial shell returned, but `wlan0` was down with no IP address.
+After reconnecting with the saved Wi-Fi credentials, the HTTPS page dump from example.com succeeded.
+Google initially failed certificate verification because its chain uses a cross-signed root.
+With cross-signed verification enabled, `retawq --dump=https://google.com` returned its redirect page.
+The interactive `retawq https://google.com` command displayed Google without a TLS error, and quitting returned to the shell.

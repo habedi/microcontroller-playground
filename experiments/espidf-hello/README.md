@@ -4,7 +4,7 @@ Smallest ESP-IDF program for the ESP32-P4, written to find out whether the vendo
 system on a board whose NuttX build never reaches a NuttShell prompt.
 
 - Board: ESP32-P4 function EV board, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Result: runs. Prints its revision, 586 KB of free heap, and a counter, over the board's CH343 UART bridge.
 
 ### Build

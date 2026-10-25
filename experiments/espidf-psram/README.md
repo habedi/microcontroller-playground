@@ -4,7 +4,7 @@ Tests whether the 32 MB of PSRAM on the ESP32-P4 function EV board works, on a c
 faults elsewhere.
 
 - Board: ESP32-P4 function EV board, chip revision v1.3
-- OS: FreeRTOS, through ESP-IDF v5.5.5
+- OS: FreeRTOS, through ESP-IDF v6.1
 - Result: works. 32 MB detected and added to the heap, at both 20 MHz and 200 MHz, with a pattern test passing
   at each.
 
@@ -62,4 +62,4 @@ Nothing needs to be done about power. ESP-IDF reserves LDO channel 2 at 1.8 V fo
 
 An ESPHome report against this same board and revision describes a load access fault at `0x5008e1a0` whenever
 any PSRAM configuration was present. See https://github.com/esphome/esphome/issues/16903. It does not
-reproduce here under ESP-IDF v5.5.5, so the silicon can drive its PSRAM.
+reproduce here under ESP-IDF v6.1, so the silicon can drive its PSRAM.

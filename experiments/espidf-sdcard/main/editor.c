@@ -8,11 +8,14 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -42,7 +45,7 @@ struct editorConfig {
   int numrows;
   erow *row;
   int dirty;
-  char filename[256];
+  char filename[512];
   char statusmsg[80];
 };
 
@@ -74,19 +77,33 @@ static void editorSetStatusMessage(const char *msg)
   snprintf(E.statusmsg, sizeof(E.statusmsg), "%s", msg);
 }
 
+/* Bytes of an escape sequence arrive together; a lone Esc key has nothing
+ * after it, so wait briefly instead of blocking and eating the next key.
+ */
+static int editorReadSeqByte(void)
+{
+  int fd = fileno(stdin);
+  fd_set fds;
+  FD_ZERO(&fds);
+  FD_SET(fd, &fds);
+  struct timeval tv = { .tv_sec = 0, .tv_usec = 50 * 1000 };
+  if (select(fd + 1, &fds, NULL, NULL, &tv) <= 0) return EOF;
+  return getchar();
+}
+
 static int editorReadKey(void)
 {
   int c = getchar();
   if (c == EOF) return 0;
 
   if (c == '\x1b') {
-    int seq0 = getchar();
+    int seq0 = editorReadSeqByte();
     if (seq0 == EOF) return '\x1b';
     if (seq0 == '[') {
-      int seq1 = getchar();
+      int seq1 = editorReadSeqByte();
       if (seq1 == EOF) return '\x1b';
       if (seq1 >= '0' && seq1 <= '9') {
-        int seq2 = getchar();
+        int seq2 = editorReadSeqByte();
         if (seq2 == '~') {
           switch (seq1) {
             case '1': return HOME_KEY;
@@ -109,7 +126,7 @@ static int editorReadKey(void)
         }
       }
     } else if (seq0 == 'O') {
-      int seq1 = getchar();
+      int seq1 = editorReadSeqByte();
       switch (seq1) {
         case 'H': return HOME_KEY;
         case 'F': return END_KEY;
@@ -221,12 +238,23 @@ static int editorOpenRows(const char *filename)
   FILE *fp = fopen(filename, "r");
   if (!fp) return -1;
 
+  /* fgets returns long lines in chunks; join them back into one row. */
   char line[512];
+  bool continuing = false;
   while (fgets(line, sizeof(line), fp)) {
     int linelen = strlen(line);
-    while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
-      linelen--;
-    editorInsertRow(E.numrows, line, linelen);
+    bool complete = linelen > 0 && line[linelen - 1] == '\n';
+    if (complete) linelen--;
+    if (continuing) {
+      editorRowAppendString(&E.row[E.numrows - 1], line, linelen);
+    } else {
+      editorInsertRow(E.numrows, line, linelen);
+    }
+    erow *row = &E.row[E.numrows - 1];
+    if (complete && row->size > 0 && row->chars[row->size - 1] == '\r') {
+      row->chars[--row->size] = '\0';
+    }
+    continuing = !complete;
   }
   fclose(fp);
   E.dirty = 0;
@@ -244,13 +272,20 @@ static int editorSave(void)
   }
 
   int total_bytes = 0;
-  for (int i = 0; i < E.numrows; i++) {
-    fprintf(fp, "%s\n", E.row[i].chars);
+  bool failed = false;
+  for (int i = 0; i < E.numrows && !failed; i++) {
+    if (fprintf(fp, "%s\n", E.row[i].chars) < 0) {
+      failed = true;
+    }
     total_bytes += E.row[i].size + 1;
   }
-  fclose(fp);
+  if (fclose(fp) != 0) failed = true;
+  if (failed) {
+    editorSetStatusMessage("Error: Write failed, file is incomplete!");
+    return -1;
+  }
   E.dirty = 0;
-  char msg[320];
+  char msg[sizeof(E.filename) + 64];
   snprintf(msg, sizeof(msg), "Wrote %d bytes to %s", total_bytes, E.filename);
   editorSetStatusMessage(msg);
   return 0;
@@ -308,7 +343,7 @@ static void editorDrawRows(struct abuf *ab)
 static void editorDrawStatusBar(struct abuf *ab)
 {
   abAppend(ab, "\x1b[7m", 4);
-  char status[80], rstatus[80];
+  char status[sizeof(E.filename) + 32], rstatus[80];
   int len = snprintf(status, sizeof(status), " %s %s",
                      E.filename[0] ? E.filename : "[No Name]",
                      E.dirty ? "(modified)" : "");
@@ -471,10 +506,15 @@ static int editorProcessKeypress(void)
 
 int editor_open(const char *filepath)
 {
+  if (strlen(filepath) >= sizeof(E.filename)) {
+    printf("nano: path too long: %s\n", filepath);
+    return 1;
+  }
+
   memset(&E, 0, sizeof(E));
   E.screenrows = 22;
   E.screencols = 80;
-  strncpy(E.filename, filepath, sizeof(E.filename) - 1);
+  strcpy(E.filename, filepath);
 
   if (editorOpenRows(filepath) != 0) {
     editorInsertRow(0, "", 0);
