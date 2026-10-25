@@ -1,0 +1,4 @@
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy", "rust-analyzer", "llvm-tools-preview"]
+targets = ["thumbv8m.main-none-eabihf", "riscv32imac-unknown-none-elf", "riscv32imafc-unknown-none-elf"]

@@ -33,6 +33,12 @@ ESPIDF_SRC    ?= experiments/espidf-hello
 ESPIDF_BUILD  ?= $(CURDIR)/build/espidf/$(notdir $(ESPIDF_SRC))
 ESPIDF_PORT   ?= /dev/ttyACM0
 
+# Bare metal Rust (esp-rs) and Zig (MicroZig) experiments.
+RUST_PACKAGE  ?= serial-heartbeat
+RUST_TARGET   ?= riscv32imac-unknown-none-elf
+RUST_BUILD    ?= $(CURDIR)/build/rust
+ZIG_BUILD     ?= $(CURDIR)/build/zig
+
 # Serial port and build directory for the onboard ESP32-C6.
 C6_PORT       ?= /dev/ttyUSB0
 C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
@@ -371,6 +377,15 @@ espidf-flash-c6: ## Flash ESP-Hosted firmware to the C6 through a UART adapter o
 .PHONY: espidf-distclean
 espidf-distclean: ## Remove the ESP-IDF build directory
 	rm -rf $(ESPIDF_BUILD)
+
+# Bare metal Rust and Zig, built from the repository root.
+.PHONY: rust-build
+rust-build: ## Build a Rust workspace package (RUST_PACKAGE=<name>)
+	cargo build --package $(RUST_PACKAGE) --release --locked --target $(RUST_TARGET) --target-dir $(RUST_BUILD)
+
+.PHONY: zig-build
+zig-build: ## Build MicroZig firmware with the root build script
+	zig build -Doptimize=ReleaseSmall --prefix $(ZIG_BUILD)
 
 # Flashing and the serial console (OS-agnostic)
 .PHONY: flash-pico

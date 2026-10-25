@@ -33,6 +33,9 @@ The boards connect over USB to a Linux development machine (amd64 or arm64):
   commit.
 - Check the nested Espressif HAL repository at `external/nuttx/arch/risc-v/src/esp32p4/esp-hal-3rdparty` directly to verify it is clean.
 - Do not flash a board or open its serial port without being asked.
+- Preserve the onboard ESP32-C6 SDIO slave firmware. It provides the P4's wireless access. Do not erase or flash the C6, including for Rust
+  experiments, unless the user explicitly authorizes replacing its wireless firmware and accepts the loss of wireless access. A general request
+  to build, test, or flash the P4 does not authorize changing the C6. Keep C6 experiments build-only by default.
 
 ## External Dependencies
 
@@ -88,6 +91,12 @@ Serial console:
 - Rust: provided by `rust-overlay` with targets `thumbv8m.main-none-eabihf`, `riscv32imac-unknown-none-elf`, and `riscv32imafc-unknown-none-elf`
   pre-installed. Flash with `probe-rs` (Pico 2) or `espflash` (ESP32).
 - Zig: pinned to 0.17.0 via `zig-overlay`. Cross compiles to all three chips and serves as a C cross compiler.
+- Bare metal Rust: `make rust-build` builds `experiments/serial-heartbeat` with esp-rs for the ESP32-C6. The root `Cargo.toml` defines the workspace
+  and release profile; the root `Cargo.lock` pins dependencies. Target settings belong in the root `.cargo/config.toml`.
+  Current esp-hal P4 support uses v3.x clock and ROM interfaces; do not bypass the minimum revision check for this board's v1.3 silicon.
+- MicroZig: `make zig-build` uses the root `build.zig` to build `experiments/gpio-blink` for the Pico 2 WH.
+  MicroZig 0.17.20 is pinned in the root `build.zig.zon` for Zig 0.17.0.
+  Use an external LED on GP0; GP25 connects to the wireless chip on this board.
 
 ## Adding a Board or an OS
 

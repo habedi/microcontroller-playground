@@ -1,0 +1,11 @@
+[package]
+name = "serial-heartbeat"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "Apache-2.0"
+
+[dependencies]
+esp-hal = { version = "=1.2.2", features = ["esp32c6"] }
+esp-println = { version = "=0.18.0", default-features = false, features = ["esp32c6", "uart", "critical-section"] }
+esp-bootloader-esp-idf = { version = "=0.6.0", features = ["esp32c6"] }
