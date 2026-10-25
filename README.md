@@ -1,10 +1,10 @@
 ## Microcontroller Playground
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/habedi/microcontroller-playground/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github&logoColor=white)](https://github.com/habedi/microcontroller-playground/actions/workflows/tests.yml)
-[![Documentation](https://img.shields.io/badge/docs-latest-007ec6?style=flat&labelColor=282c34&logo=read-the-docs&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/docs)
-[![License](https://img.shields.io/badge/license-Apache--2.0-007ec6?style=flat&labelColor=282c34&logo=open-source-initiative&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/LICENSE)
 [![MCU](https://img.shields.io/badge/MCU-Pico%202%20%7C%20ESP32--{P4,S3}-507ec6?style=flat&labelColor=282c34&logo=riscv&logoColor=white)](docs/)
 [![RTOS](https://img.shields.io/badge/RTOS-NuttX%20%7C%20FreeRTOS-507ec6?style=flat&labelColor=282c34&logo=apache&logoColor=white)](https://nuttx.apache.org/)
+[![Documentation](https://img.shields.io/badge/docs-latest-007ec6?style=flat&labelColor=282c34&logo=read-the-docs&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/docs)
+[![License](https://img.shields.io/badge/license-Apache--2.0-007ec6?style=flat&labelColor=282c34&logo=open-source-initiative&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/LICENSE)
 
 ---
 
