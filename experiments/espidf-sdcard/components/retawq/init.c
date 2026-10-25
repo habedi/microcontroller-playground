@@ -736,9 +736,10 @@ static void __init copy_word(char* dest)
 #define strdup_word_tolower(dest) dest = my_strndup_tolower(wordstart, wordlen)
 
 static void __init warn_section(tConfigSectionCode c, const char* str)
-{ char buf[1024], *spfbuf;
-  my_spf(buf, 1024, &spfbuf, _("configuration section %s (line %d): %s"),
-    strCsc[c], linecount, str);
+{ char buf[1024], *spfbuf, line[3 * sizeof(size_t) + 1];
+  snprintf(line, sizeof(line), "%zu", linecount);
+  my_spf(buf, 1024, &spfbuf, _("configuration section %s (line %s): %s"),
+    strCsc[c], line, str);
   show_warning(spfbuf);
   my_spf_cleanup(buf, spfbuf);
 }

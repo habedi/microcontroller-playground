@@ -58,6 +58,8 @@ Suggestions that exceed the console line limit are omitted.
 
 Retawq uses mbedTLS for HTTPS, with hostname and certificate date checks enabled.
 The ESP-IDF certificate bundle supplies trusted public root certificates.
+Cross-signed certificate verification is enabled for chains such as Google's.
+ECDSA signature verification runs in software because the hardware peripheral is unavailable on silicon revision v1.3.
 Use an explicit HTTPS URL:
 
 ```text
@@ -99,4 +101,7 @@ Leak detection is disabled for these browser tests because retawq's existing tea
 The HTTPS tests and ESP32-P4 firmware build passed.
 The image was flashed on the Waveshare ESP32-P4-WIFI6, and flash hash verification passed.
 The serial shell returned, but `wlan0` was down with no IP address.
-The HTTPS page dump failed during hostname lookup, so HTTPS on the board remains unverified.
+After reconnecting with the saved Wi-Fi credentials, the HTTPS page dump from example.com succeeded.
+Google initially failed certificate verification because its chain uses a cross-signed root.
+With cross-signed verification enabled, `retawq --dump=https://google.com` returned its redirect page.
+The interactive `retawq https://google.com` command displayed Google without a TLS error, and quitting returned to the shell.

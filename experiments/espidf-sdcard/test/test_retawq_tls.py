@@ -23,6 +23,7 @@ DRIVER = r'''
 #include <assert.h>
 
 static mbedtls_x509_crt roots;
+extern void test_config_warning(void);
 int esp_crt_bundle_attach(void *config)
 { mbedtls_ssl_conf_ca_chain(config, &roots, NULL); return 0; }
 
@@ -33,6 +34,10 @@ static void record_event(tConnection *conn, tConnCbEventKind event)
 int main(int argc, char **argv)
 {
   assert(argc == 3);
+  if (strcmp(argv[1], "warning") == 0) {
+    test_config_warning();
+    return 0;
+  }
   if (strcmp(argv[1], "selftest") == 0) {
     int sockets[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
@@ -113,6 +118,12 @@ class TlsTests(unittest.TestCase):
         run(["cmake", "--build", str(build), "-j", "4"], timeout=120)
         driver = work / "driver.c"
         driver.write_text(DRIVER)
+        init_driver = work / "init_warning.c"
+        init_driver.write_text(
+            '#include "init.c"\n'
+            'void test_config_warning(void) {\n'
+            '  fd_stderr = 2; __lfdmbs = 4; linecount = (size_t)-1;\n'
+            '  warn_section(cscUnknown, "test warning");\n}\n')
         command = shlex.split(os.environ.get("CC", "cc"))
         for name in ("CFLAGS", "SANFLAGS"):
             command += shlex.split(os.environ.get(name, ""))
@@ -123,8 +134,9 @@ class TlsTests(unittest.TestCase):
                         build / "library", build / "tf-psa-crypto/include",
                         build / "tf-psa-crypto/core"):
             command += ["-I" + str(include)]
+        command += [str(init_driver)]
         command += [str(COMPONENT / name) for name in
-                    ("init.c", "main.c", "parser.c", "stuff.c", "cursesbi.c")]
+                    ("main.c", "parser.c", "stuff.c", "cursesbi.c")]
         cls.binary = work / "retawq"
         command += [str(driver), str(build / "library/libmbedtls.a"),
                     str(build / "library/libmbedx509.a"),
@@ -163,6 +175,7 @@ class TlsTests(unittest.TestCase):
             server.daemon_threads = True
             server.release = threading.Event()
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.maximum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(self.certdir / (certificate + ".pem"),
                                     self.certdir / "server.key")
@@ -186,6 +199,11 @@ class TlsTests(unittest.TestCase):
     def test_nonblocking_retry_direction(self):
         result = self.invoke("selftest", "unused")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_warning_formats_full_size_t_line_number(self):
+        result = self.invoke("warning", "unused")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"(line {sys.maxsize * 2 + 1}): test warning", result.stderr)
 
     def test_trusted_https_and_buffered_records(self):
         with self.server("valid") as url:
