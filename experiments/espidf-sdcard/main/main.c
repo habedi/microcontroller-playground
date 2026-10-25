@@ -24,9 +24,11 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
 #include "esp_wifi.h"
@@ -652,8 +654,46 @@ static int cmd_top(int argc, char **argv)
 
 static int cmd_free(int argc, char **argv)
 {
-  printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
-  printf("Minimum free heap: %lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
+  printf("%-17s %10s %10s %10s %10s\n", "Memory Tier", "Total", "Free", "Min Free", "Max Block");
+  printf("%-17s %10s %10s %10s %10s\n", "-----------", "-----", "----", "--------", "---------");
+
+  struct {
+    const char *name;
+    uint32_t caps;
+  } tiers[] = {
+    {"Internal SRAM",   MALLOC_CAP_INTERNAL},
+    {"DMA-capable",     MALLOC_CAP_DMA},
+    {"SPI RAM (PSRAM)", MALLOC_CAP_SPIRAM},
+  };
+
+  for (size_t i = 0; i < sizeof(tiers) / sizeof(tiers[0]); i++)
+    {
+      size_t total = heap_caps_get_total_size(tiers[i].caps);
+      size_t free_sz = heap_caps_get_free_size(tiers[i].caps);
+      size_t min_free = heap_caps_get_minimum_free_size(tiers[i].caps);
+      size_t max_block = heap_caps_get_largest_free_block(tiers[i].caps);
+
+      if (total > 0 || free_sz > 0 || tiers[i].caps == MALLOC_CAP_SPIRAM)
+        {
+          printf("%-17s %10zu %10zu %10zu %10zu\n",
+                 tiers[i].name, total, free_sz, min_free, max_block);
+        }
+    }
+
+  printf("\nOverall System Allocator:\n");
+  printf("  Total free:       %10lu bytes\n", (unsigned long)esp_get_free_heap_size());
+  printf("  Minimum free:     %10lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
+  printf("  Largest block:    %10zu bytes\n", heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+
+  if (esp_psram_is_initialized())
+    {
+      printf("  PSRAM Physical:   %10zu bytes (32 MB)\n", esp_psram_get_size());
+    }
+  else
+    {
+      printf("  PSRAM Physical:   Disabled / Not initialized\n");
+    }
+
   return 0;
 }
 
