@@ -20,6 +20,7 @@
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "editor.h"
+#include "path_util.h"
 #include "esp_chip_info.h"
 #include "esp_console.h"
 #include "esp_err.h"
@@ -78,73 +79,20 @@ static void power_on_slot(void)
   vTaskDelay(pdMS_TO_TICKS(300));
 }
 
-static void resolve_path(const char *in, char *out, size_t out_len)
+static bool resolve_path(const char *in, char *out, size_t out_len)
 {
-  char combined[512];
-  if (!in || in[0] == '\0')
-    {
-      strncpy(out, s_cwd, out_len - 1);
-      out[out_len - 1] = '\0';
-      return;
-    }
+  return path_resolve(s_cwd, in, out, out_len);
+}
 
-  if (in[0] == '/')
+/* resolve_path for command arguments; prints an error on failure. */
+static bool resolve_arg(const char *cmd, const char *in, char *out, size_t out_len)
+{
+  if (resolve_path(in, out, out_len))
     {
-      strncpy(combined, in, sizeof(combined) - 1);
+      return true;
     }
-  else
-    {
-      snprintf(combined, sizeof(combined), "%s/%s", s_cwd, in);
-    }
-  combined[sizeof(combined) - 1] = '\0';
-
-  char segments[16][64];
-  int count = 0;
-
-  char copy[512];
-  strncpy(copy, combined, sizeof(copy) - 1);
-  copy[sizeof(copy) - 1] = '\0';
-
-  char *saveptr = NULL;
-  char *tok = strtok_r(copy, "/", &saveptr);
-  while (tok != NULL)
-    {
-      if (strcmp(tok, ".") == 0)
-        {
-          /* Current directory: skip */
-        }
-      else if (strcmp(tok, "..") == 0)
-        {
-          if (count > 0)
-            {
-              count--;
-            }
-        }
-      else if (strlen(tok) > 0)
-        {
-          if (count < 16)
-            {
-              strncpy(segments[count], tok, sizeof(segments[count]) - 1);
-              segments[count][sizeof(segments[count]) - 1] = '\0';
-              count++;
-            }
-        }
-      tok = strtok_r(NULL, "/", &saveptr);
-    }
-
-  if (count == 0)
-    {
-      strncpy(out, "/", out_len - 1);
-      out[out_len - 1] = '\0';
-      return;
-    }
-
-  out[0] = '\0';
-  for (int i = 0; i < count; i++)
-    {
-      strncat(out, "/", out_len - strlen(out) - 1);
-      strncat(out, segments[i], out_len - strlen(out) - 1);
-    }
+  printf("%s: path too long: %s\n", cmd, in);
+  return false;
 }
 
 static int cmd_pwd(int argc, char **argv)
@@ -155,21 +103,21 @@ static int cmd_pwd(int argc, char **argv)
 
 static int cmd_cd(int argc, char **argv)
 {
-  char target[512];
+  /* Same size as s_cwd so that a valid target always fits. */
+  char target[sizeof(s_cwd)];
   if (argc < 2)
     {
-      strncpy(target, SDCARD_MOUNT_POINT, sizeof(target));
+      snprintf(target, sizeof(target), "%s", SDCARD_MOUNT_POINT);
     }
-  else
+  else if (!resolve_arg("cd", argv[1], target, sizeof(target)))
     {
-      resolve_path(argv[1], target, sizeof(target));
+      return 1;
     }
 
   struct stat st;
   if (stat(target, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      strncpy(s_cwd, target, sizeof(s_cwd) - 1);
-      s_cwd[sizeof(s_cwd) - 1] = '\0';
+      memcpy(s_cwd, target, sizeof(s_cwd));
       return 0;
     }
   printf("cd: %s: No such directory\n", target);
@@ -181,7 +129,10 @@ static int cmd_ls(int argc, char **argv)
   char path[512];
   if (argc > 1)
     {
-      resolve_path(argv[1], path, sizeof(path));
+      if (!resolve_arg("ls", argv[1], path, sizeof(path)))
+        {
+          return 1;
+        }
     }
   else
     {
@@ -228,35 +179,63 @@ static int cmd_ls(int argc, char **argv)
   return 0;
 }
 
-static void tree_traverse(const char *base_path, int depth)
+static bool is_dot_entry(const char *name)
 {
-  if (depth > 5) return;
-  DIR *d = opendir(base_path);
-  if (!d) return;
+  return strcmp(name, ".") == 0 || strcmp(name, "..") == 0;
+}
 
+static int tree_count(const char *path)
+{
+  DIR *d = opendir(path);
+  if (!d) return 0;
+
+  int count = 0;
   struct dirent *entry;
-  char sub_path[1024];
-  struct stat st;
   while ((entry = readdir(d)) != NULL)
     {
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      if (!is_dot_entry(entry->d_name))
+        {
+          count++;
+        }
+    }
+  closedir(d);
+  return count;
+}
+
+/* path and prefix are shared buffers that each level extends and restores,
+ * so the stack frame stays small during recursion.
+ */
+static void tree_traverse(char *path, size_t path_cap, char *prefix, size_t prefix_cap, int depth)
+{
+  if (depth > 5) return;
+  int total = tree_count(path);
+  DIR *d = opendir(path);
+  if (!d) return;
+
+  size_t path_len = strlen(path);
+  size_t prefix_len = strlen(prefix);
+  struct dirent *entry;
+  struct stat st;
+  int index = 0;
+  while ((entry = readdir(d)) != NULL)
+    {
+      if (is_dot_entry(entry->d_name))
         {
           continue;
         }
-      for (int i = 0; i < depth; i++)
+      bool last = ++index >= total;
+      int n = snprintf(path + path_len, path_cap - path_len, "/%s", entry->d_name);
+      bool fits = n >= 0 && (size_t)n < path_cap - path_len;
+      bool is_dir = fits && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+
+      printf("%s%s %s%s\n", prefix, last ? "└──" : "├──", entry->d_name, is_dir ? "/" : "");
+      if (is_dir)
         {
-          printf("│   ");
+          snprintf(prefix + prefix_len, prefix_cap - prefix_len, "%s", last ? "    " : "│   ");
+          tree_traverse(path, path_cap, prefix, prefix_cap, depth + 1);
+          prefix[prefix_len] = '\0';
         }
-      snprintf(sub_path, sizeof(sub_path), "%s/%s", base_path, entry->d_name);
-      if (stat(sub_path, &st) == 0 && S_ISDIR(st.st_mode))
-        {
-          printf("├── %s/\n", entry->d_name);
-          tree_traverse(sub_path, depth + 1);
-        }
-      else
-        {
-          printf("├── %s\n", entry->d_name);
-        }
+      path[path_len] = '\0';
     }
   closedir(d);
 }
@@ -264,9 +243,13 @@ static void tree_traverse(const char *base_path, int depth)
 static int cmd_tree(int argc, char **argv)
 {
   char path[512];
+  char prefix[64] = "";
   if (argc > 1)
     {
-      resolve_path(argv[1], path, sizeof(path));
+      if (!resolve_arg("tree", argv[1], path, sizeof(path)))
+        {
+          return 1;
+        }
     }
   else
     {
@@ -275,7 +258,7 @@ static int cmd_tree(int argc, char **argv)
     }
 
   printf("%s\n", path);
-  tree_traverse(path, 0);
+  tree_traverse(path, sizeof(path), prefix, sizeof(prefix), 0);
   return 0;
 }
 
@@ -288,7 +271,10 @@ static int cmd_cat(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("cat", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   FILE *f = fopen(full_path, "r");
   if (!f)
@@ -317,7 +303,10 @@ static int cmd_write(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("write", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   FILE *f = fopen(full_path, "w");
   if (!f)
@@ -332,7 +321,12 @@ static int cmd_write(int argc, char **argv)
       if (i < argc - 1) fputc(' ', f);
     }
   fputc('\n', f);
-  fclose(f);
+  bool failed = ferror(f) != 0;
+  if (fclose(f) != 0 || failed)
+    {
+      printf("write: failed writing %s\n", full_path);
+      return 1;
+    }
   printf("Wrote to %s\n", full_path);
   return 0;
 }
@@ -347,18 +341,30 @@ static int cmd_cp(int argc, char **argv)
 
   char src[512];
   char dst[512];
-  resolve_path(argv[1], src, sizeof(src));
-  resolve_path(argv[2], dst, sizeof(dst));
+  if (!resolve_arg("cp", argv[1], src, sizeof(src)) ||
+      !resolve_arg("cp", argv[2], dst, sizeof(dst)))
+    {
+      return 1;
+    }
 
   struct stat st;
   if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode))
     {
-      char *slash = strrchr(src, '/');
-      const char *basename = slash ? slash + 1 : src;
-      char dst_combined[1024];
-      snprintf(dst_combined, sizeof(dst_combined), "%s/%s", dst, basename);
-      strncpy(dst, dst_combined, sizeof(dst) - 1);
-      dst[sizeof(dst) - 1] = '\0';
+      const char *basename = strrchr(src, '/') + 1;
+      size_t len = strlen(dst);
+      int n = snprintf(dst + len, sizeof(dst) - len, "/%s", basename);
+      if (n < 0 || (size_t)n >= sizeof(dst) - len)
+        {
+          printf("cp: path too long: %s/%s\n", argv[2], basename);
+          return 1;
+        }
+    }
+
+  /* Opening the destination with "wb" would truncate the source first. */
+  if (strcmp(src, dst) == 0)
+    {
+      printf("cp: %s and %s are the same file\n", src, dst);
+      return 1;
     }
 
   FILE *in = fopen(src, "rb");
@@ -379,13 +385,23 @@ static int cmd_cp(int argc, char **argv)
   char buf[512];
   size_t n;
   size_t total = 0;
+  bool failed = false;
   while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
     {
-      fwrite(buf, 1, n, out);
+      if (fwrite(buf, 1, n, out) != n)
+        {
+          failed = true;
+          break;
+        }
       total += n;
     }
+  failed = failed || ferror(in) != 0;
   fclose(in);
-  fclose(out);
+  if (fclose(out) != 0 || failed)
+    {
+      printf("cp: failed after %zu bytes from %s to %s\n", total, src, dst);
+      return 1;
+    }
   printf("Copied %zu bytes from %s to %s\n", total, src, dst);
   return 0;
 }
@@ -399,7 +415,10 @@ static int cmd_rm(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("rm", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   if (unlink(full_path) == 0)
     {
@@ -419,7 +438,10 @@ static int cmd_mkdir(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("mkdir", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
 
   if (mkdir(full_path, 0755) == 0)
     {
@@ -590,16 +612,16 @@ static int cmd_top(int argc, char **argv)
           snprintf(items[i].core, sizeof(items[i].core), "1");
         }
 
-      uint32_t task_time1 = 0;
+      /* A task created between samples has no baseline; show 0% for it. */
+      uint32_t task_delta = 0;
       for (UBaseType_t j = 0; j < task_count1; j++)
         {
           if (status1[j].xHandle == status2[i].xHandle)
             {
-              task_time1 = status1[j].ulRunTimeCounter;
+              task_delta = status2[i].ulRunTimeCounter - status1[j].ulRunTimeCounter;
               break;
             }
         }
-      uint32_t task_delta = status2[i].ulRunTimeCounter - task_time1;
       items[i].cpu_pct = ((float)task_delta * 100.0f) / (float)total_capacity;
       if (strncmp(items[i].name, "IDLE", 4) == 0)
         {
@@ -687,7 +709,8 @@ static int cmd_free(int argc, char **argv)
 
   if (esp_psram_is_initialized())
     {
-      printf("  PSRAM Physical:   %10zu bytes (32 MB)\n", esp_psram_get_size());
+      size_t psram_size = esp_psram_get_size();
+      printf("  PSRAM Physical:   %10zu bytes (%zu MB)\n", psram_size, psram_size / (1024 * 1024));
     }
   else
     {
@@ -744,7 +767,10 @@ static int cmd_nano(int argc, char **argv)
     }
 
   char full_path[512];
-  resolve_path(argv[1], full_path, sizeof(full_path));
+  if (!resolve_arg("nano", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
   return editor_open(full_path);
 }
 
@@ -781,10 +807,17 @@ static int cmd_wifi_scan(int argc, char **argv)
 
   uint16_t found = 0;
   esp_wifi_scan_get_ap_num(&found);
+  if (found == 0)
+    {
+      printf("Found 0 networks\n");
+      return 0;
+    }
+
   uint16_t count = found > 20 ? 20 : found;
   wifi_ap_record_t *records = malloc(count * sizeof(wifi_ap_record_t));
   if (!records)
     {
+      esp_wifi_clear_ap_list();
       printf("wifi_scan: out of memory\n");
       return 1;
     }
@@ -830,6 +863,9 @@ static int cmd_wifi_connect(int argc, char **argv)
   s_wifi_connected = false;
   esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
 
+  /* Drop a token left by an earlier attempt that got its IP after timing out. */
+  xSemaphoreTake(s_ip_sem, 0);
+
   printf("Connecting to %s...\n", argv[1]);
   esp_wifi_connect();
 
@@ -872,12 +908,14 @@ static int cmd_ifconfig(int argc, char **argv)
   esp_netif_ip_info_t ip_info;
   esp_netif_get_ip_info(s_sta_netif, &ip_info);
 
-  uint8_t mac[6] = {0};
-  esp_wifi_get_mac(WIFI_IF_STA, mac);
+  esp_ip4_addr_t broadcast = {
+      .addr = ip_info.ip.addr | ~ip_info.netmask.addr,
+  };
 
   printf("wlan0: flags=%s\n", s_wifi_connected ? "UP,CONNECTED" : "DOWN");
   printf("       inet " IPSTR " netmask " IPSTR " broadcast " IPSTR "\n",
-         IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&ip_info.gw));
+         IP2STR(&ip_info.ip), IP2STR(&ip_info.netmask), IP2STR(&broadcast));
+  printf("       gateway " IPSTR "\n", IP2STR(&ip_info.gw));
   return 0;
 }
 
@@ -946,6 +984,11 @@ static int cmd_ping(int argc, char **argv)
   freeaddrinfo(res);
 
   SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+  if (!sem)
+    {
+      printf("ping: out of memory\n");
+      return 1;
+    }
   esp_ping_config_t ping_config = ESP_PING_DEFAULT_CONFIG();
   ping_config.target_addr = target_addr;
   ping_config.count = 4;
@@ -1091,7 +1134,7 @@ static void custom_completion(const char *buf, linenoiseCompletions *lc)
           strncpy(dir_part, arg, dlen);
           dir_part[dlen] = '\0';
         }
-      resolve_path(dir_part, dir_to_open, sizeof(dir_to_open));
+      if (!resolve_path(dir_part, dir_to_open, sizeof(dir_to_open))) return;
       strncpy(match_prefix, last_slash + 1, sizeof(match_prefix) - 1);
     }
   else
@@ -1379,7 +1422,8 @@ void app_main(void)
   esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
   repl_config.prompt = "nsh> ";
   repl_config.max_cmdline_length = 256;
-  repl_config.task_stack_size = 8192;
+  /* Tab completion alone keeps about 5 KB of path buffers on this stack. */
+  repl_config.task_stack_size = 16384;
 
   esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));

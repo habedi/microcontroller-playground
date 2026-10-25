@@ -78,7 +78,7 @@ make console TTY=/dev/ttyACM0
 
 > [!NOTE]
 > The onboard WCH CH343 bridge links UART0 (GPIO 37 and GPIO 38) to `/dev/ttyACM0`.
-> Silicon revisions below v3.0 needs `configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the NuttX revision check.
+> Silicon revisions below v3.0 need `configs/nuttx/esp32p4-function-ev-board/nsh-rev1` to bypass the NuttX revision check.
 > Serial port access needs membership in the `dialout` group (can be added by running `sudo usermod -aG dialout $USER`).
 
 ---
