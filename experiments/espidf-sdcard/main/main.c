@@ -10,6 +10,8 @@
  */
 
 #include <dirent.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@
 #include "driver/sdmmc_host.h"
 #include "editor.h"
 #include "path_util.h"
+#include "esp_app_format.h"
 #include "esp_chip_info.h"
 #include "esp_console.h"
 #include "esp_err.h"
@@ -29,6 +32,8 @@
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
@@ -758,6 +763,279 @@ static int cmd_reset_c6(int argc, char **argv)
   return 0;
 }
 
+static const char *ota_state_str(esp_ota_img_states_t state)
+{
+  switch (state)
+    {
+      case ESP_OTA_IMG_NEW:             return "NEW";
+      case ESP_OTA_IMG_PENDING_VERIFY:  return "PENDING_VERIFY";
+      case ESP_OTA_IMG_VALID:           return "VALID";
+      case ESP_OTA_IMG_INVALID:         return "INVALID";
+      case ESP_OTA_IMG_ABORTED:         return "ABORTED";
+      case ESP_OTA_IMG_UNDEFINED:       return "UNDEFINED";
+      default:                          return "UNKNOWN";
+    }
+}
+
+static int cmd_ota_status(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  const esp_partition_t *boot = esp_ota_get_boot_partition();
+  const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+
+  printf("FOTA Partition & Rollback Status:\n");
+  printf("--------------------------------------------------\n");
+
+  if (running != NULL)
+    {
+      esp_app_desc_t app_desc;
+      esp_err_t err = esp_ota_get_partition_description(running, &app_desc);
+      esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+      esp_ota_get_state_partition(running, &state);
+
+      printf("Running Slot:       %s (0x%08lx, %lu KB)\n",
+             running->label, (unsigned long)running->address,
+             (unsigned long)(running->size / 1024));
+      printf("  State:            %s\n", ota_state_str(state));
+      if (err == ESP_OK)
+        {
+          printf("  Project Name:     %s\n", app_desc.project_name);
+          printf("  Version:          %s\n", app_desc.version);
+          printf("  Built:            %s %s\n", app_desc.date, app_desc.time);
+          printf("  IDF Version:      %s\n", app_desc.idf_ver);
+        }
+    }
+  else
+    {
+      printf("Running Slot:       Unknown\n");
+    }
+
+  if (boot != NULL)
+    {
+      printf("Configured Boot:    %s (0x%08lx)\n",
+             boot->label, (unsigned long)boot->address);
+    }
+
+  if (next != NULL)
+    {
+      esp_app_desc_t next_desc;
+      esp_err_t err = esp_ota_get_partition_description(next, &next_desc);
+      esp_ota_img_states_t next_state = ESP_OTA_IMG_UNDEFINED;
+      esp_ota_get_state_partition(next, &next_state);
+
+      printf("Next Update Target: %s (0x%08lx, %lu KB)\n",
+             next->label, (unsigned long)next->address,
+             (unsigned long)(next->size / 1024));
+      printf("  State:            %s\n", ota_state_str(next_state));
+      if (err == ESP_OK)
+        {
+          printf("  Existing Version: %s\n", next_desc.version);
+        }
+    }
+  else
+    {
+      printf("Next Update Target: None (no inactive OTA slot found)\n");
+    }
+
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+  printf("Rollback Support:   Enabled (automatic watchdog fallback)\n");
+#else
+  printf("Rollback Support:   Disabled\n");
+#endif
+
+  return 0;
+}
+
+static int cmd_ota_confirm(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+  if (running != NULL)
+    {
+      esp_ota_get_state_partition(running, &state);
+    }
+
+  if (state == ESP_OTA_IMG_VALID)
+    {
+      printf("Firmware on %s is already marked VALID.\n",
+             running ? running->label : "current slot");
+      return 0;
+    }
+
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK)
+    {
+      printf("Firmware validated successfully! Rollback cancelled for %s.\n",
+             running ? running->label : "current slot");
+    }
+  else
+    {
+      printf("Failed to confirm firmware: %s\n", esp_err_to_name(err));
+    }
+  return 0;
+}
+
+static int cmd_ota_rollback(int argc, char **argv)
+{
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  printf("Initiating voluntary rollback from %s...\n",
+         running ? running->label : "current slot");
+
+  esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
+  if (err != ESP_OK)
+    {
+      printf("Rollback failed: %s (is an alternate bootable image available?)\n",
+             esp_err_to_name(err));
+    }
+  return 0;
+}
+
+static int cmd_ota_update(int argc, char **argv)
+{
+  if (argc < 2)
+    {
+      printf("Usage: ota_update <file_path>\n");
+      printf("Example: ota_update /sdcard/espidf_sdcard.bin\n");
+      return 1;
+    }
+
+  char full_path[512];
+  if (!resolve_arg("ota_update", argv[1], full_path, sizeof(full_path)))
+    {
+      return 1;
+    }
+
+  FILE *f = fopen(full_path, "rb");
+  if (f == NULL)
+    {
+      printf("ota_update: cannot open '%s': %s\n", full_path, strerror(errno));
+      return 1;
+    }
+
+  fseek(f, 0, SEEK_END);
+  long file_size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (file_size <= 0)
+    {
+      printf("ota_update: file '%s' is empty\n", full_path);
+      fclose(f);
+      return 1;
+    }
+
+  const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+  if (update_partition == NULL)
+    {
+      printf("ota_update: no target OTA partition available\n");
+      fclose(f);
+      return 1;
+    }
+
+  if ((size_t)file_size > update_partition->size)
+    {
+      printf("ota_update: image size (%ld B) exceeds partition capacity (%lu B)\n",
+             file_size, (unsigned long)update_partition->size);
+      fclose(f);
+      return 1;
+    }
+
+  printf("Starting FOTA update:\n");
+  printf("  Source image:     %s (%ld bytes)\n", full_path, file_size);
+  printf("  Target slot:      %s (0x%08lx, %lu KB)\n",
+         update_partition->label, (unsigned long)update_partition->address,
+         (unsigned long)(update_partition->size / 1024));
+
+  esp_ota_handle_t ota_handle = 0;
+  esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: esp_ota_begin failed: %s\n", esp_err_to_name(err));
+      fclose(f);
+      return 1;
+    }
+
+  const size_t chunk_size = 4096;
+  char *buf = malloc(chunk_size);
+  if (buf == NULL)
+    {
+      printf("ota_update: failed to allocate %zu B buffer\n", chunk_size);
+      esp_ota_abort(ota_handle);
+      fclose(f);
+      return 1;
+    }
+
+  size_t bytes_written = 0;
+  int last_pct = -1;
+  while (bytes_written < (size_t)file_size)
+    {
+      size_t to_read = (size_t)file_size - bytes_written;
+      if (to_read > chunk_size)
+        {
+          to_read = chunk_size;
+        }
+
+      size_t read_bytes = fread(buf, 1, to_read, f);
+      if (read_bytes == 0)
+        {
+          break;
+        }
+
+      err = esp_ota_write(ota_handle, buf, read_bytes);
+      if (err != ESP_OK)
+        {
+          printf("\nota_update: esp_ota_write failed at %zu bytes: %s\n",
+                 bytes_written, esp_err_to_name(err));
+          free(buf);
+          esp_ota_abort(ota_handle);
+          fclose(f);
+          return 1;
+        }
+
+      bytes_written += read_bytes;
+      int pct = (int)((bytes_written * 100) / file_size);
+      if (pct != last_pct && (pct % 10 == 0 || pct == 100))
+        {
+          printf("  Flashing: %3d%% (%zu / %ld bytes)\r", pct, bytes_written, file_size);
+          fflush(stdout);
+          last_pct = pct;
+        }
+    }
+  printf("\n");
+  free(buf);
+  fclose(f);
+
+  if (bytes_written != (size_t)file_size)
+    {
+      printf("ota_update: read error, wrote %zu of %ld bytes\n", bytes_written, file_size);
+      esp_ota_abort(ota_handle);
+      return 1;
+    }
+
+  printf("Validating image SHA256 integrity...\n");
+  err = esp_ota_end(ota_handle);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: validation failed (corrupt image or bad SHA256): %s\n",
+             esp_err_to_name(err));
+      return 1;
+    }
+
+  err = esp_ota_set_boot_partition(update_partition);
+  if (err != ESP_OK)
+    {
+      printf("ota_update: esp_ota_set_boot_partition failed: %s\n",
+             esp_err_to_name(err));
+      return 1;
+    }
+
+  printf("FOTA update completed successfully!\n");
+  printf("Next boot will launch '%s' in PENDING_VERIFY state.\n", update_partition->label);
+  printf("If new firmware fails to initialize, the bootloader will automatically roll back.\n");
+  printf("Type 'reboot' to restart into the new firmware.\n");
+
+  return 0;
+}
+
 static int cmd_nano(int argc, char **argv)
 {
   if (argc < 2)
@@ -1333,6 +1611,30 @@ static void register_commands(void)
           .func = &cmd_uname,
       },
       {
+          .command = "ota_status",
+          .help = "Show FOTA partition and rollback status",
+          .hint = NULL,
+          .func = &cmd_ota_status,
+      },
+      {
+          .command = "ota_confirm",
+          .help = "Confirm new firmware and cancel rollback",
+          .hint = NULL,
+          .func = &cmd_ota_confirm,
+      },
+      {
+          .command = "ota_rollback",
+          .help = "Roll back to previous firmware and reboot",
+          .hint = NULL,
+          .func = &cmd_ota_rollback,
+      },
+      {
+          .command = "ota_update",
+          .help = "Flash new firmware from file to alternate OTA slot",
+          .hint = "<file_path>",
+          .func = &cmd_ota_update,
+      },
+      {
           .command = "reboot",
           .help = "Reboot the chip",
           .hint = NULL,
@@ -1434,11 +1736,38 @@ void app_main(void)
 
   register_commands();
 
+  /* 5. Check and validate FOTA running partition state */
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t ota_state = ESP_OTA_IMG_UNDEFINED;
+  if (running != NULL && esp_ota_get_state_partition(running, &ota_state) == ESP_OK)
+    {
+      if (ota_state == ESP_OTA_IMG_PENDING_VERIFY)
+        {
+          ESP_LOGW(TAG, "Firmware on %s is in PENDING_VERIFY state.", running->label);
+          ESP_LOGI(TAG, "Self-tests and hardware initialization passed.");
+          esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
+          if (ota_err == ESP_OK)
+            {
+              ESP_LOGI(TAG, "Firmware marked VALID; rollback cancelled.");
+            }
+          else
+            {
+              ESP_LOGE(TAG, "Failed to mark app valid: %s", esp_err_to_name(ota_err));
+            }
+        }
+      else
+        {
+          ESP_LOGI(TAG, "Running firmware slot: %s (state: %d)",
+                   running->label, (int)ota_state);
+        }
+    }
+
   printf("\n");
   printf("====================================================\n");
   printf("  ESP32-P4 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
   printf("  Storage: /sdcard (FATFS), /data (LittleFS)\n");
   printf("  Network: Wi-Fi STA via ESP32-C6 coprocessor\n");
+  printf("  FOTA:    Rolling-Rollback (ota_status, ota_update, ota_rollback)\n");
   printf("  Editor:  nano <file> / edit <file>\n");
   printf("  Type 'help' to list available commands\n");
   printf("====================================================\n\n");

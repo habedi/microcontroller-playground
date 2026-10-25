@@ -41,6 +41,10 @@ Readline support provides command history with Up/Down arrows, in-line editing w
 - `top`: display live FreeRTOS tasks with CPU percentage, stack margin, and core affinity
 - `free`: display heap memory statistics
 - `uname`: display operating system, chip revision, and core count
+- `ota_status`: display active partition slot, firmware version, and rollback state
+- `ota_confirm`: confirm new firmware as valid and cancel rollback
+- `ota_rollback`: roll back to the previous firmware slot and reboot
+- `ota_update <file>`: flash firmware binary from storage to alternate OTA slot
 - `reboot`: restart the board
 - `reset_c6`: pulse hardware reset to the ESP32-C6 coprocessor
 
