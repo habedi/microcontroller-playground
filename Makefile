@@ -43,10 +43,6 @@ C6_BUILD      ?= $(CURDIR)/build/espidf/espidf-c6-slave
 ESPIDF_ARGS   ?= -C $(ESPIDF_SRC) -B $(ESPIDF_BUILD) \
                  -D SDKCONFIG=$(ESPIDF_BUILD)/sdkconfig
 
-# CYW43439 wireless firmware blob checked during wireless NuttX builds.
-CYW43_FIRMWARE ?= \
-  external/pico-sdk/lib/cyw43-driver/firmware/43439A0-7.95.49.00.combined
-
 # The architecture of the current NuttX configuration, empty when the tree is not configured yet.
 NUTTX_ARCH = $(shell sed -n 's/^CONFIG_ARCH="\(.*\)"$$/\1/p' $(NUTTX_DIR)/.config 2>/dev/null)
 
