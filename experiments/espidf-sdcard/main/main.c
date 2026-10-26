@@ -136,7 +136,7 @@ static int cmd_cd(int argc, char **argv)
   char target[sizeof(s_cwd)];
   if (argc < 2)
     {
-      snprintf(target, sizeof(target), "%s", SDCARD_MOUNT_POINT);
+      snprintf(target, sizeof(target), "%s", SHELL_HOME);
     }
   else if (!resolve_arg("cd", argv[1], target, sizeof(target)))
     {

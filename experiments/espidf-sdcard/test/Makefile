@@ -15,7 +15,7 @@ SRC      = ../main
 test: $(BUILD)/test_path_util $(BUILD)/test_editor $(BUILD)/test_wget
 	$(BUILD)/test_path_util
 	$(BUILD)/test_editor
-	CC="$(CC)" CFLAGS="$(CFLAGS)" SANFLAGS="$(SANFLAGS)" LDFLAGS="$(LDFLAGS)" $(PYTHON) -m unittest -v test_wifi.py test_autocomplete.py test_wget.py
+	CC="$(CC)" CFLAGS="$(CFLAGS)" SANFLAGS="$(SANFLAGS)" LDFLAGS="$(LDFLAGS)" $(PYTHON) -m unittest -v test_wifi.py test_autocomplete.py test_wget.py test_filesystem.py
 
 test-retawq-tls:
 	CC="$(CC)" CFLAGS="$(CFLAGS)" SANFLAGS="$(SANFLAGS)" LDFLAGS="$(LDFLAGS)" $(UV) run --group test python -m unittest -v test_retawq_tls.py

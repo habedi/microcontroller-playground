@@ -1,9 +1,11 @@
 #include "wget.h"
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "esp_crt_bundle.h"
@@ -25,6 +27,42 @@ static esp_err_t download_event(esp_http_client_event_t *event)
                        (size_t)event->data_len;
     }
   return ESP_OK;
+}
+
+static int publish_download(const char *temporary, const char *path)
+{
+  if (rename(temporary, path) == 0) return 0;
+  if (errno != EEXIST) return -1;
+
+  /* FAT cannot replace a file with rename; keep the old file until publication succeeds. */
+  /* shortcut: replacement is not atomic; add boot recovery if power loss must be handled without manual recovery. */
+  struct stat st;
+  if (stat(path, &st) != 0) return -1;
+  if (!S_ISREG(st.st_mode)) {
+    errno = EISDIR;
+    return -1;
+  }
+  char backup[528];
+  int len = snprintf(backup, sizeof(backup), "%s.bakXXXXXX", path);
+  if (len < 0 || (size_t)len >= sizeof(backup)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  int fd = mkstemp(backup);
+  if (fd < 0) return -1;
+  int closed = close(fd);
+  if (unlink(backup) != 0 || closed != 0) return -1;
+  if (rename(path, backup) != 0) return -1;
+  if (rename(temporary, path) != 0) {
+    int saved_errno = errno;
+    if (rename(backup, path) != 0)
+      fprintf(stderr, "wget: previous file preserved at %s\n", backup);
+    errno = saved_errno;
+    return -1;
+  }
+  if (unlink(backup) != 0)
+    fprintf(stderr, "wget: could not remove previous file at %s\n", backup);
+  return 0;
 }
 
 int wget_download(const char *url, const char *path)
@@ -101,7 +139,7 @@ int wget_download(const char *url, const char *path)
   if (!to_stdout)
     {
       /* Publish only a complete response, preserving any existing destination on failure. */
-      if (!failed && rename(temporary, path) != 0)
+      if (!failed && publish_download(temporary, path) != 0)
         {
           perror("wget: cannot replace output");
           failed = true;

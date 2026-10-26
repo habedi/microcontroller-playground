@@ -3,11 +3,14 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 
 static const char *mode;
+static bool moved_backup;
 static size_t test_fwrite(const void *data, size_t size, size_t count, FILE *stream)
 {
   if (strcmp(mode, "write-error") == 0) return 0;
@@ -23,16 +26,43 @@ static int test_fclose(FILE *stream)
 static int test_rename(const char *source, const char *destination)
 {
   if (strcmp(mode, "rename-error") == 0) { errno = EACCES; return -1; }
-  return rename(source, destination);
+  if (strncmp(mode, "fat", 3) == 0) {
+    if (strstr(source, ".part") && moved_backup &&
+        (strcmp(mode, "fat-publish-error") == 0 || strcmp(mode, "fat-rollback-error") == 0)) {
+      errno = EIO;
+      return -1;
+    }
+    if ((strstr(destination, ".bak") && strcmp(mode, "fat-backup-error") == 0) ||
+        (strstr(source, ".bak") && strcmp(mode, "fat-rollback-error") == 0)) {
+      errno = EACCES;
+      return -1;
+    }
+    struct stat st;
+    if (stat(destination, &st) == 0) { errno = EEXIST; return -1; }
+  }
+  int result = rename(source, destination);
+  if (result == 0 && strstr(destination, ".bak")) moved_backup = true;
+  return result;
+}
+
+static int test_mkstemp(char *path)
+{
+  if (strstr(path, ".bak") && strcmp(mode, "fat-backup-create-error") == 0) {
+    errno = ENOSPC;
+    return -1;
+  }
+  return mkstemp(path);
 }
 
 #define fwrite test_fwrite
 #define fclose test_fclose
 #define rename test_rename
+#define mkstemp test_mkstemp
 #include "../main/wget.c"
 #undef fwrite
 #undef fclose
 #undef rename
+#undef mkstemp
 
 struct test_http_client {
   esp_http_client_config_t config;

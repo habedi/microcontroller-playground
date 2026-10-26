@@ -100,9 +100,11 @@ wget -O - https://example.com
 
 Downloads stream to a temporary file and are published only after the response is complete.
 Network errors, HTTP error responses, and write failures leave an existing destination unchanged.
-On the SD card, use a new output filename or remove the old file first: FATFS does not replace files during rename.
 Console output streams directly and can contain a partial response if the request fails.
 This command implements only the `-O` download form.
+On FAT, replacing an existing file uses a temporary backup because FAT cannot replace files with `rename`.
+If replacement and recovery both fail, the command prints the backup path so the old file can be recovered.
+A power loss during replacement can also leave a `.bak` file beside the download; replacement on FAT is not atomic.
 
 ### Build and Flash
 
@@ -142,6 +144,13 @@ They cover quoted paths, escaped filenames, long prefixes, and accepting a compl
 The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.
 Download tests cover binary bodies, redirects, incomplete transfers, HTTP errors, and output failures.
 The `wget` host tests and ESP32-P4 firmware build passed; the new command has not been flashed or verified on hardware.
+Regression tests cover editor allocation failures, download replacement with FAT rename rules, and failed replacement recovery.
+The shell copy tests run the SDK's FatFS on a RAM disk with the repository's filename and locking options.
+They check case aliases, short filename aliases, source preservation, and the home directory for each board.
+`CONFIG_FATFS_FS_LOCK=6` prevents writes through aliases of an open source file and allows the six directory levels used by `tree`.
+Run `make espidf-distclean ESPIDF_SRC=experiments/espidf-sdcard` before rebuilding an existing build directory to apply the new default.
+These regression tests and clean ESP32-P4, ESP32-S3, and ESP32-C6 firmware builds passed.
+The fixes have not been flashed or verified on hardware.
 
 Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
 This target uses uv's `test` dependency group for mbedTLS's Python code generators.

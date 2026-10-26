@@ -19,7 +19,7 @@ class WgetTests(unittest.TestCase):
                               capture_output=True)
 
     def test_binary_download_and_redirect_body(self):
-        for mode in ("success", "redirect"):
+        for mode in ("success", "redirect", "fat"):
             with self.subTest(mode=mode):
                 self.output.write_bytes(b"previous")
                 result = self.invoke(mode)
@@ -29,13 +29,32 @@ class WgetTests(unittest.TestCase):
 
     def test_failures_preserve_destination_and_remove_temporary(self):
         for mode in ("init-error", "network-error", "http-error", "incomplete",
-                     "write-error", "close-error", "rename-error"):
+                     "write-error", "close-error", "rename-error",
+                     "fat-backup-error", "fat-backup-create-error", "fat-publish-error"):
             with self.subTest(mode=mode):
                 self.output.write_bytes(b"previous")
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(self.output.read_bytes(), b"previous")
                 self.assertEqual(list(self.directory.iterdir()), [self.output])
+
+    def test_failed_rollback_keeps_backup_and_reports_its_path(self):
+        self.output.write_bytes(b"previous")
+        result = self.invoke("fat-rollback-error")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        backups = list(self.directory.glob("download.bak*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b"previous")
+        self.assertIn(str(backups[0]).encode(), result.stderr)
+        self.assertEqual(list(self.directory.iterdir()), backups)
+
+    def test_fat_directory_is_never_replaced(self):
+        self.output.mkdir()
+        (self.output / "keep").write_bytes(b"previous")
+        result = self.invoke("fat")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual((self.output / "keep").read_bytes(), b"previous")
+        self.assertEqual(list(self.directory.iterdir()), [self.output])
 
     def test_failure_without_existing_destination(self):
         self.assertEqual(self.invoke("network-error").returncode, 1)

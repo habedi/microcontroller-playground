@@ -54,14 +54,19 @@ static struct editorConfig E;
 struct abuf {
   char *b;
   int len;
+  bool failed;
 };
 
-#define ABUF_INIT {NULL, 0}
+#define ABUF_INIT {NULL, 0, false}
 
 static void abAppend(struct abuf *ab, const char *s, int len)
 {
+  if (ab->failed) return;
   char *new_buf = realloc(ab->b, ab->len + len);
-  if (new_buf == NULL) return;
+  if (new_buf == NULL) {
+    ab->failed = true;
+    return;
+  }
   memcpy(&new_buf[ab->len], s, len);
   ab->b = new_buf;
   ab->len += len;
@@ -137,23 +142,43 @@ static int editorReadKey(void)
   return c;
 }
 
-static void editorInsertRow(int at, const char *s, size_t len)
+static bool editorInsertRow(int at, const char *s, size_t len)
 {
-  if (at < 0 || at > E.numrows) return;
-  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+  if (at < 0 || at > E.numrows) return false;
+  char *chars = malloc(len + 1);
+  if (chars == NULL) {
+    editorSetStatusMessage("Error: Out of memory!");
+    return false;
+  }
+  memcpy(chars, s, len);
+  chars[len] = '\0';
+  erow *rows = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+  if (rows == NULL) {
+    free(chars);
+    editorSetStatusMessage("Error: Out of memory!");
+    return false;
+  }
+  E.row = rows;
   memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
 
   E.row[at].size = len;
-  E.row[at].chars = malloc(len + 1);
-  memcpy(E.row[at].chars, s, len);
-  E.row[at].chars[len] = '\0';
+  E.row[at].chars = chars;
   E.numrows++;
   E.dirty++;
+  return true;
 }
 
 static void editorFreeRow(erow *row)
 {
   free(row->chars);
+}
+
+static void editorFreeRows(void)
+{
+  for (int i = 0; i < E.numrows; i++) editorFreeRow(&E.row[i]);
+  free(E.row);
+  E.row = NULL;
+  E.numrows = 0;
 }
 
 static void editorDelRow(int at)
@@ -165,23 +190,35 @@ static void editorDelRow(int at)
   E.dirty++;
 }
 
-static void editorRowInsertChar(erow *row, int at, int c)
+static bool editorRowInsertChar(erow *row, int at, int c)
 {
   if (at < 0 || at > row->size) at = row->size;
-  row->chars = realloc(row->chars, row->size + 2);
+  char *chars = realloc(row->chars, row->size + 2);
+  if (chars == NULL) {
+    editorSetStatusMessage("Error: Out of memory!");
+    return false;
+  }
+  row->chars = chars;
   memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
   row->size++;
   row->chars[at] = c;
   E.dirty++;
+  return true;
 }
 
-static void editorRowAppendString(erow *row, char *s, size_t len)
+static bool editorRowAppendString(erow *row, const char *s, size_t len)
 {
-  row->chars = realloc(row->chars, row->size + len + 1);
+  char *chars = realloc(row->chars, row->size + len + 1);
+  if (chars == NULL) {
+    editorSetStatusMessage("Error: Out of memory!");
+    return false;
+  }
+  row->chars = chars;
   memcpy(&row->chars[row->size], s, len);
   row->size += len;
   row->chars[row->size] = '\0';
   E.dirty++;
+  return true;
 }
 
 static void editorRowDelChar(erow *row, int at)
@@ -195,19 +232,21 @@ static void editorRowDelChar(erow *row, int at)
 static void editorInsertChar(int c)
 {
   if (E.cy == E.numrows) {
-    editorInsertRow(E.numrows, "", 0);
+    char ch = c;
+    if (!editorInsertRow(E.numrows, &ch, 1)) return;
+  } else {
+    if (!editorRowInsertChar(&E.row[E.cy], E.cx, c)) return;
   }
-  editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
 }
 
 static void editorInsertNewline(void)
 {
   if (E.cx == 0) {
-    editorInsertRow(E.cy, "", 0);
+    if (!editorInsertRow(E.cy, "", 0)) return;
   } else {
     erow *row = &E.row[E.cy];
-    editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+    if (!editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx)) return;
     row = &E.row[E.cy];
     row->size = E.cx;
     row->chars[row->size] = '\0';
@@ -226,8 +265,9 @@ static void editorDelChar(void)
     editorRowDelChar(row, E.cx - 1);
     E.cx--;
   } else {
-    E.cx = E.row[E.cy - 1].size;
-    editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+    int previous_size = E.row[E.cy - 1].size;
+    if (!editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size)) return;
+    E.cx = previous_size;
     editorDelRow(E.cy);
     E.cy--;
   }
@@ -245,10 +285,13 @@ static int editorOpenRows(const char *filename)
     int linelen = strlen(line);
     bool complete = linelen > 0 && line[linelen - 1] == '\n';
     if (complete) linelen--;
-    if (continuing) {
-      editorRowAppendString(&E.row[E.numrows - 1], line, linelen);
-    } else {
-      editorInsertRow(E.numrows, line, linelen);
+    bool loaded = continuing
+        ? editorRowAppendString(&E.row[E.numrows - 1], line, linelen)
+        : editorInsertRow(E.numrows, line, linelen);
+    if (!loaded) {
+      fclose(fp);
+      errno = ENOMEM;
+      return -1;
     }
     erow *row = &E.row[E.numrows - 1];
     if (complete && row->size > 0 && row->chars[row->size - 1] == '\r') {
@@ -256,7 +299,12 @@ static int editorOpenRows(const char *filename)
     }
     continuing = !complete;
   }
-  fclose(fp);
+  bool failed = ferror(fp) != 0;
+  if (fclose(fp) != 0) failed = true;
+  if (failed) {
+    errno = EIO;
+    return -1;
+  }
   E.dirty = 0;
   return 0;
 }
@@ -388,7 +436,11 @@ static void editorRefreshScreen(void)
   abAppend(&ab, buf, strlen(buf));
   abAppend(&ab, "\x1b[?25h", 6);
 
-  write(STDOUT_FILENO, ab.b, ab.len);
+  if (ab.failed) {
+    editorSetStatusMessage("Error: Out of memory!");
+  } else {
+    write(STDOUT_FILENO, ab.b, ab.len);
+  }
   abFree(&ab);
 }
 
@@ -517,7 +569,11 @@ int editor_open(const char *filepath)
   strcpy(E.filename, filepath);
 
   if (editorOpenRows(filepath) != 0) {
-    editorInsertRow(0, "", 0);
+    if (errno != ENOENT || !editorInsertRow(0, "", 0)) {
+      printf("nano: cannot load %s: %s\n", filepath, strerror(errno));
+      editorFreeRows();
+      return 1;
+    }
     editorSetStatusMessage("New File -- Ctrl+S to save, Ctrl+Q to exit");
     E.dirty = 0;
   } else {
@@ -535,12 +591,7 @@ int editor_open(const char *filepath)
   /* Clear screen on exit */
   write(STDOUT_FILENO, "\x1b[2J\x1b[H", 7);
 
-  for (int i = 0; i < E.numrows; i++) {
-    editorFreeRow(&E.row[i]);
-  }
-  free(E.row);
-  E.row = NULL;
-  E.numrows = 0;
+  editorFreeRows();
 
   return 0;
 }
