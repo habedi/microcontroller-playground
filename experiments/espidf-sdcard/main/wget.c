@@ -1,6 +1,7 @@
 #include "wget.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,40 +30,36 @@ static esp_err_t download_event(esp_http_client_event_t *event)
   return ESP_OK;
 }
 
-static int publish_download(const char *temporary, const char *path)
+static int publish_download(const char *temporary, const char *backup, const char *path)
 {
   if (rename(temporary, path) == 0) return 0;
   if (errno != EEXIST) return -1;
 
   /* FAT cannot replace a file with rename; keep the old file until publication succeeds. */
   /* shortcut: replacement is not atomic; add boot recovery if power loss must be handled without manual recovery. */
-  struct stat st;
-  if (stat(path, &st) != 0) return -1;
-  if (!S_ISREG(st.st_mode)) {
-    errno = EISDIR;
-    return -1;
-  }
-  char backup[528];
-  int len = snprintf(backup, sizeof(backup), "%s.bakXXXXXX", path);
-  if (len < 0 || (size_t)len >= sizeof(backup)) {
-    errno = ENAMETOOLONG;
-    return -1;
-  }
-  int fd = mkstemp(backup);
-  if (fd < 0) return -1;
-  int closed = close(fd);
-  if (unlink(backup) != 0 || closed != 0) return -1;
   if (rename(path, backup) != 0) return -1;
-  if (rename(temporary, path) != 0) {
-    int saved_errno = errno;
-    if (rename(backup, path) != 0)
-      fprintf(stderr, "wget: previous file preserved at %s\n", backup);
-    errno = saved_errno;
-    return -1;
+
+  /* Inspect the object actually moved, inside the staging directory we own. */
+  int error = 0;
+  int fd = open(backup, O_RDONLY | O_NONBLOCK | O_NOFOLLOW);
+  if (fd < 0) {
+    error = errno;
+  } else {
+    struct stat st;
+    if (fstat(fd, &st) != 0) error = errno;
+    else if (!S_ISREG(st.st_mode)) error = EISDIR;
+    if (close(fd) != 0 && error == 0) error = errno;
   }
-  if (unlink(backup) != 0)
-    fprintf(stderr, "wget: could not remove previous file at %s\n", backup);
-  return 0;
+  if (error == 0 && rename(temporary, path) == 0) {
+    if (unlink(backup) != 0)
+      fprintf(stderr, "wget: could not remove previous file at %s\n", backup);
+    return 0;
+  }
+  if (error == 0) error = errno;
+  if (rename(backup, path) != 0)
+    fprintf(stderr, "wget: previous output preserved at %s\n", backup);
+  errno = error;
+  return -1;
 }
 
 int wget_download(const char *url, const char *path)
@@ -73,21 +70,31 @@ int wget_download(const char *url, const char *path)
       return 1;
     }
 
-  char temporary[528] = "";
+  char staging[528] = "";
+  char temporary[sizeof(staging) + 4];
+  char backup[sizeof(staging) + 4];
   FILE *stream = stdout;
   bool to_stdout = strcmp(path, "-") == 0;
   if (!to_stdout)
     {
-      int len = snprintf(temporary, sizeof(temporary), "%s.partXXXXXX", path);
-      if (len < 0 || (size_t)len >= sizeof(temporary))
+      int len = snprintf(staging, sizeof(staging), "%s.partXXXXXX", path);
+      if (len < 0 || (size_t)len >= sizeof(staging))
         {
           fprintf(stderr, "wget: output path too long\n");
           return 1;
         }
-      int fd = mkstemp(temporary);
+      if (mkdtemp(staging) == NULL)
+        {
+          perror("wget: cannot create staging directory");
+          return 1;
+        }
+      snprintf(temporary, sizeof(temporary), "%s/new", staging);
+      snprintf(backup, sizeof(backup), "%s/old", staging);
+      int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0600);
       if (fd < 0)
         {
           perror("wget: cannot create output");
+          rmdir(staging);
           return 1;
         }
       stream = fdopen(fd, "wb");
@@ -95,6 +102,7 @@ int wget_download(const char *url, const char *path)
         {
           close(fd);
           unlink(temporary);
+          rmdir(staging);
           perror("wget: cannot open output");
           return 1;
         }
@@ -139,12 +147,14 @@ int wget_download(const char *url, const char *path)
   if (!to_stdout)
     {
       /* Publish only a complete response, preserving any existing destination on failure. */
-      if (!failed && publish_download(temporary, path) != 0)
+      if (!failed && publish_download(temporary, backup, path) != 0)
         {
           perror("wget: cannot replace output");
           failed = true;
         }
       if (failed) unlink(temporary);
+      if (rmdir(staging) != 0)
+        fprintf(stderr, "wget: recovery directory retained at %s\n", staging);
     }
   return failed ? 1 : 0;
 }

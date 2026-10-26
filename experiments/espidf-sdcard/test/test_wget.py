@@ -1,4 +1,5 @@
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +31,8 @@ class WgetTests(unittest.TestCase):
     def test_failures_preserve_destination_and_remove_temporary(self):
         for mode in ("init-error", "network-error", "http-error", "incomplete",
                      "write-error", "close-error", "rename-error",
-                     "fat-backup-error", "fat-backup-create-error", "fat-publish-error"):
+                     "fat-backup-error", "fat-staging-create-error", "fat-publish-error",
+                     "fat-open-error", "fat-stat-error", "fat-close-error"):
             with self.subTest(mode=mode):
                 self.output.write_bytes(b"previous")
                 result = self.invoke(mode)
@@ -42,11 +44,46 @@ class WgetTests(unittest.TestCase):
         self.output.write_bytes(b"previous")
         result = self.invoke("fat-rollback-error")
         self.assertEqual(result.returncode, 1, result.stderr)
-        backups = list(self.directory.glob("download.bak*"))
-        self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].read_bytes(), b"previous")
-        self.assertIn(str(backups[0]).encode(), result.stderr)
-        self.assertEqual(list(self.directory.iterdir()), backups)
+        staging = list(self.directory.glob("download.part*"))
+        self.assertEqual(len(staging), 1)
+        backup = staging[0] / "old"
+        self.assertEqual(backup.read_bytes(), b"previous")
+        self.assertIn(str(backup).encode(), result.stderr)
+        self.assertEqual(list(staging[0].iterdir()), [backup])
+        self.assertEqual(list(self.directory.iterdir()), staging)
+
+    def test_destination_swapped_before_backup_is_restored_without_publication(self):
+        for kind in ("directory", "symlink", "fifo"):
+            with self.subTest(kind=kind):
+                self.output.write_bytes(b"previous")
+                result = self.invoke("fat-swap-" + kind)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                displaced = self.directory / "download.displaced"
+                self.assertEqual(displaced.read_bytes(), b"previous")
+                if kind == "directory":
+                    self.assertTrue(self.output.is_dir())
+                    self.output.rmdir()
+                elif kind == "symlink":
+                    self.assertTrue(self.output.is_symlink())
+                    self.assertEqual(self.output.read_bytes(), b"previous")
+                    self.output.unlink()
+                else:
+                    self.assertTrue(stat.S_ISFIFO(self.output.stat().st_mode))
+                    self.output.unlink()
+                self.assertEqual(list(self.directory.iterdir()), [displaced])
+                displaced.unlink()
+
+    def test_competing_destination_keeps_both_outputs(self):
+        self.output.write_bytes(b"previous")
+        result = self.invoke("fat-competitor")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.output.read_bytes(), b"competing output")
+        staging = list(self.directory.glob("download.part*"))
+        self.assertEqual(len(staging), 1)
+        backup = staging[0] / "old"
+        self.assertEqual(backup.read_bytes(), b"previous")
+        self.assertIn(str(backup).encode(), result.stderr)
+        self.assertEqual(list(staging[0].iterdir()), [backup])
 
     def test_fat_directory_is_never_replaced(self):
         self.output.mkdir()
