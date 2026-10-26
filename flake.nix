@@ -28,12 +28,14 @@
 
           commonTools = with pkgs; [
             gnumake
+            git
             cmake
             ninja
             pkg-config
             picocom
             openocd
             uv
+            python315
           ];
 
           hostPythonDeps = with pkgs; [
