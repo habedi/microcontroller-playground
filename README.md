@@ -1,7 +1,7 @@
 ## Microcontroller Playground
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/habedi/microcontroller-playground/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github&logoColor=white)](https://github.com/habedi/microcontroller-playground/actions/workflows/tests.yml)
-[![MCU](https://img.shields.io/badge/MCU-Pico%202%20W%20%7C%20ESP32--{P4,S3}-507ec6?style=flat&labelColor=282c34&logo=riscv&logoColor=white)](docs/)
+[![MCU](https://img.shields.io/badge/MCU-Pico%202%20W%20%7C%20ESP32--{P4,S3,C6}-507ec6?style=flat&labelColor=282c34&logo=riscv&logoColor=white)](docs/)
 [![RTOS](https://img.shields.io/badge/RTOS-NuttX%20%7C%20FreeRTOS-507ec6?style=flat&labelColor=282c34&logo=apache&logoColor=white)](https://nuttx.apache.org/)
 [![Documentation](https://img.shields.io/badge/docs-latest-007ec6?style=flat&labelColor=282c34&logo=read-the-docs&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/docs)
 [![License](https://img.shields.io/badge/license-Apache--2.0-007ec6?style=flat&labelColor=282c34&logo=open-source-initiative&logoColor=white)](https://github.com/habedi/microcontroller-playground/blob/main/LICENSE)
@@ -17,6 +17,7 @@ This is a playground for my microcontroller projects and experiments.
 | 1 | Raspberry Pi Pico 2 WH (RP2350)     | [Pico 2 Specs](https://www.raspberrypi.com/products/raspberry-pi-pico-2/), [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf)                                                                                   | [Pico 2 Notes](docs/raspberrypi-pico-2.md) |       <img src="docs/assets/images/pico2wh.png" alt="Raspberry Pi Pico 2 WH" width="150">       |
 | 2 | Waveshare ESP32-P4-WIFI6 (ESP32-P4) | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-P4-WIFI6), [Espressif ESP32-P4 Specs](https://www.espressif.com/en/products/socs/esp32-p4)                                                                                                | [ESP32-P4 Notes](docs/esp32p4.md)          |  <img src="docs/assets/images/esp32-p4-wifi6.png" alt="Waveshare ESP32-P4-WIFI6" width="150">   |
 | 3 | Waveshare ESP32-S3-Zero (ESP32-S3)  | [Waveshare Wiki](https://www.waveshare.com/wiki/ESP32-S3-Zero), [Espressif ESP32-S3 Specs](https://www.espressif.com/en/products/socs/esp32-s3), [Electrokit](https://www.electrokit.com/en/esp32-s3-dev-board-mini-8mb-psram-8mb-with-headers) | [ESP32-S3 Notes](docs/esp32s3.md)          | <img src="docs/assets/images/esp32-s3-zero-n8r8.png" alt="Waveshare ESP32-S3-Zero" width="150"> |
+| 4 | ESP32-C6-DevKitC-1 (ESP32-C6)       | [Espressif ESP32-C6 Specs](https://www.espressif.com/en/products/socs/esp32-c6), [Electrokit](https://www.electrokit.com/en/esp32-c6-devkitc-utvecklingskort-8mb)                                                                             | [ESP32-C6 Notes](docs/esp32c6.md)          | <img src="docs/assets/images/esp32-c6-devkitc-8mb.png" alt="ESP32-C6-DevKitC-1" width="150"> |
 
 ---
 
@@ -87,6 +88,16 @@ make espidf-install ESPIDF_TARGET=esp32s3
 make espidf-build ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_PORT=/dev/ttyACM0
 make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
+```
+
+#### 6. Build and run on the ESP32-C6
+
+```shell
+# ESP-IDF C firmware
+make espidf-install ESPIDF_TARGET=esp32c6
+make espidf-build ESPIDF_TARGET=esp32c6
+make espidf-flash ESPIDF_PORT=/dev/ttyUSB0
+make espidf-monitor ESPIDF_PORT=/dev/ttyUSB0
 ```
 
 ---

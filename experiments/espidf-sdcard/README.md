@@ -1,12 +1,12 @@
 ## ESP-IDF Workstation Shell
 
-ESP-IDF experiment providing an interactive NSH-compatible command shell with filesystem storage, wireless networking, and an in-terminal text editor across both the ESP32-P4 and the ESP32-S3.
+ESP-IDF experiment providing an interactive NSH-compatible command shell with filesystem storage, wireless networking, and an in-terminal text editor across the ESP32-P4, the ESP32-S3, and the ESP32-C6.
 
-- Boards: Waveshare ESP32-P4-WIFI6 (chip revision v1.3), Waveshare ESP32-S3-Zero
+- Boards: Waveshare ESP32-P4-WIFI6 (chip revision v1.3), Waveshare ESP32-S3-Zero, Espressif ESP32-C6-DevKitC-1-N8
 - OS: FreeRTOS, through ESP-IDF v6.1
-- Storage: 128 GB MicroSD card at `/sdcard` (FATFS) and 12 MB LittleFS at `/data` on ESP32-P4; 2.375 MB LittleFS at `/data` on ESP32-S3
-- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO on ESP32-P4; native on-chip 2.4 GHz Wi-Fi on ESP32-S3
-- Console: interactive REPL with `nsh> ` prompt on UART0 (ESP32-P4) or USB Serial/JTAG (ESP32-S3)
+- Storage: 128 GB MicroSD card at `/sdcard` (FATFS) and 12 MB LittleFS at `/data` on ESP32-P4; 2.375 MB LittleFS at `/data` on ESP32-S3 and ESP32-C6
+- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO on ESP32-P4; native on-chip 2.4 GHz Wi-Fi on ESP32-S3; native on-chip 2.4 GHz Wi-Fi 6 on ESP32-C6
+- Console: interactive REPL with `nsh> ` prompt on UART0 (ESP32-P4, ESP32-C6) or USB Serial/JTAG (ESP32-S3)
 
 ### Hardware Configuration
 
@@ -23,9 +23,15 @@ ESP32-S3 (Waveshare ESP32-S3-Zero):
 - Wireless: native on-chip 2.4 GHz 802.11 b/g/n radio.
 - Console: internal USB Serial/JTAG controller routed directly to the USB-C port.
 
+ESP32-C6 (Espressif ESP32-C6-DevKitC-1-N8):
+
+- Internal storage: 2.375 MB LittleFS partition on onboard 8 MB NOR flash at offset `0x5a0000`.
+- Wireless: native on-chip 2.4 GHz 802.11ax/b/g/n Wi-Fi 6 radio.
+- Console: Silicon Labs CP2102N UART bridge on UART0 (`/dev/ttyUSB0`) or internal USB Serial/JTAG (`/dev/ttyACM0`).
+
 ### Interactive Commands
 
-The firmware runs `esp_console` (UART0 on ESP32-P4, USB Serial/JTAG on ESP32-S3) with prompt `nsh> `.
+The firmware runs `esp_console` (UART0 on ESP32-P4 and ESP32-C6, USB Serial/JTAG on ESP32-S3) with prompt `nsh> `.
 Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
 Path completion accepts quoted or escaped spaces and escapes suggested filenames for the command parser.
 Suggestions that exceed the console line limit are omitted.
@@ -114,7 +120,14 @@ make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3 ESPIDF_PORT=/dev/ttyACM0
 ```
 
-Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
+Build for ESP32-C6:
+
+```shell
+make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6
+make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6 ESPIDF_PORT=/dev/ttyUSB0
+```
+
+Connect via serial terminal (`picocom -b 115200 /dev/ttyUSB0` or `/dev/ttyACM0`) or through the `board` MCP server.
 
 ### Host Tests
 
