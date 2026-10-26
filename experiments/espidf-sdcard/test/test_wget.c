@@ -11,10 +11,18 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_random.h"
 
 static const char *mode;
 static bool moved_backup;
 static int backup_fd = -1;
+static int mkdir_calls;
+
+uint32_t esp_random(void)
+{
+  static uint32_t next = 0x12345678;
+  return next++;
+}
 static size_t test_fwrite(const void *data, size_t size, size_t count, FILE *stream)
 {
   if (strcmp(mode, "write-error") == 0) return 0;
@@ -70,13 +78,29 @@ static int test_rename(const char *source, const char *destination)
   return result;
 }
 
-static char *test_mkdtemp(char *path)
+static int test_mkdir(const char *path, mode_t permissions)
 {
+  mkdir_calls++;
   if (strcmp(mode, "fat-staging-create-error") == 0) {
     errno = ENOSPC;
-    return NULL;
+    return -1;
   }
-  return mkdtemp(path);
+  if (strcmp(mode, "staging-collisions-exhausted") == 0) {
+    errno = EEXIST;
+    return -1;
+  }
+  if (strcmp(mode, "staging-collision") == 0 && mkdir_calls == 1) {
+    assert(mkdir(path, 0700) == 0);
+    char marker[1024];
+    snprintf(marker, sizeof(marker), "%s/keep", path);
+    FILE *file = fopen(marker, "w");
+    assert(file);
+    assert(fputs("another download", file) >= 0);
+    assert(fclose(file) == 0);
+    errno = EEXIST;
+    return -1;
+  }
+  return mkdir(path, permissions);
 }
 
 static int test_open(const char *path, int flags, ...)
@@ -121,7 +145,7 @@ static int test_close(int fd)
 #define fwrite test_fwrite
 #define fclose test_fclose
 #define rename test_rename
-#define mkdtemp test_mkdtemp
+#define mkdir test_mkdir
 #define open test_open
 #define fstat test_fstat
 #define close test_close
@@ -129,7 +153,7 @@ static int test_close(int fd)
 #undef fwrite
 #undef fclose
 #undef rename
-#undef mkdtemp
+#undef mkdir
 #undef open
 #undef fstat
 #undef close
@@ -196,5 +220,6 @@ int main(int argc, char **argv)
   mode = argv[1];
   int result = wget_download(argv[2], argv[3]);
   if (client.config.url != NULL) assert(client.cleaned);
+  if (strcmp(mode, "staging-collisions-exhausted") == 0) assert(mkdir_calls == 8);
   return result;
 }

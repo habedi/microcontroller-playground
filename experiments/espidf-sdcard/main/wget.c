@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_random.h"
 
 struct download_output {
   FILE *stream;
@@ -62,6 +64,21 @@ static int publish_download(const char *temporary, const char *backup, const cha
   return -1;
 }
 
+static int create_staging_directory(const char *path, char *staging, size_t size)
+{
+  for (int attempt = 0; attempt < 8; attempt++) {
+    int len = snprintf(staging, size, "%s.part%08" PRIx32, path, esp_random());
+    if (len < 0 || (size_t)len >= size) {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
+    if (mkdir(staging, 0700) == 0) return 0;
+    if (errno != EEXIST) return -1;
+  }
+  errno = EEXIST;
+  return -1;
+}
+
 int wget_download(const char *url, const char *path)
 {
   if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)
@@ -77,13 +94,7 @@ int wget_download(const char *url, const char *path)
   bool to_stdout = strcmp(path, "-") == 0;
   if (!to_stdout)
     {
-      int len = snprintf(staging, sizeof(staging), "%s.partXXXXXX", path);
-      if (len < 0 || (size_t)len >= sizeof(staging))
-        {
-          fprintf(stderr, "wget: output path too long\n");
-          return 1;
-        }
-      if (mkdtemp(staging) == NULL)
+      if (create_staging_directory(path, staging, sizeof(staging)) != 0)
         {
           perror("wget: cannot create staging directory");
           return 1;

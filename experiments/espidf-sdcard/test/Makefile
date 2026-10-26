@@ -27,7 +27,8 @@ $(BUILD)/test_editor: test_editor.c $(SRC)/editor.c $(SRC)/editor.h | $(BUILD)
 	$(CC) $(CFLAGS) -Wno-unused-result $(SANFLAGS) -o $@ test_editor.c $(LDFLAGS)
 
 $(BUILD)/test_wget: test_wget.c $(SRC)/wget.c $(SRC)/wget.h \
-                    wget_stubs/esp_http_client.h wget_stubs/esp_crt_bundle.h | $(BUILD)
+                    wget_stubs/esp_http_client.h wget_stubs/esp_crt_bundle.h \
+                    wget_stubs/esp_random.h | $(BUILD)
 	$(CC) $(CFLAGS) -Iwget_stubs $(SANFLAGS) -o $@ test_wget.c $(LDFLAGS)
 
 $(BUILD):

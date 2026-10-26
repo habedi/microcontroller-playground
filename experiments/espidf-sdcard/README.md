@@ -105,7 +105,7 @@ This command implements only the `-O` download form.
 On FAT, replacing an existing file moves the old output into the staging directory because FAT cannot replace files with `rename`.
 The moved output is checked through its file descriptor before publishing the download.
 If replacement and recovery both fail, the command prints the backup path so the old file can be recovered.
-A power loss during replacement can leave a `<output>.partXXXXXX` directory containing `old`, `new`, or both; replacement on FAT is not atomic.
+A power loss during replacement can leave a `<output>.part<random>` directory containing `old`, `new`, or both; replacement on FAT is not atomic.
 
 ### Build and Flash
 
@@ -148,6 +148,7 @@ The `wget` host tests and ESP32-P4 firmware build passed; the new command has no
 Regression tests cover editor allocation failures, download replacement with FAT rename rules, and failed replacement recovery.
 Download race tests replace the destination with a directory, symlink, or FIFO before the backup move.
 They also check that a competing destination is preserved and that the previous output remains recoverable.
+Staging directory collision tests check that existing directories are not changed and that repeated collisions stop safely.
 The shell copy tests run the SDK's FatFS on a RAM disk with the repository's filename and locking options.
 They check case aliases, short filename aliases, source preservation, and the home directory for each board.
 `CONFIG_FATFS_FS_LOCK=6` prevents writes through aliases of an open source file and allows the six directory levels used by `tree`.
@@ -161,6 +162,7 @@ Bare `cd` restored `/sdcard` from `/data`.
 An SD card copy through a case alias was rejected with the source preserved, and an ordinary copy succeeded with matching contents.
 Temporary verification files were removed; the onboard C6 wireless firmware was not changed.
 Editor allocation failures and FAT download replacement recovery remain covered by host tests.
+The later download staging race fix passed sanitized host tests and firmware builds for all three ESP32 targets; it has not been flashed.
 
 Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
 This target uses uv's `test` dependency group for mbedTLS's Python code generators.

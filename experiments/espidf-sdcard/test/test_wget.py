@@ -97,6 +97,21 @@ class WgetTests(unittest.TestCase):
         self.assertEqual(self.invoke("network-error").returncode, 1)
         self.assertEqual(list(self.directory.iterdir()), [])
 
+    def test_staging_name_collision_does_not_touch_existing_directory(self):
+        result = self.invoke("staging-collision")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_bytes(), b"abc\0def")
+        existing = list(self.directory.glob("download.part*"))
+        self.assertEqual(len(existing), 1)
+        self.assertEqual((existing[0] / "keep").read_bytes(), b"another download")
+
+    def test_staging_collisions_stop_without_changing_destination(self):
+        self.output.write_bytes(b"previous")
+        result = self.invoke("staging-collisions-exhausted")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.output.read_bytes(), b"previous")
+        self.assertEqual(list(self.directory.iterdir()), [self.output])
+
     def test_stdout_contains_only_response_body(self):
         result = self.invoke(path="-")
         self.assertEqual(result.returncode, 0, result.stderr)
