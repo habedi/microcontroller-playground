@@ -54,7 +54,6 @@ make nuttx-configure BOARD=raspberrypi-pico-2:usbnsh
 make nuttx-build
 make flash-pico-uf2             # Hold the BOOTSEL button pressed down while plugging the board in
 make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
-make console TTY=/dev/ttyACM0   # Picocom at 115200 baud; quit with C-a C-x
 ```
 
 Press Enter twice after opening the console to reach the `nsh>` prompt.
@@ -87,7 +86,7 @@ make console TTY=/dev/ttyACM0
 make espidf-install ESPIDF_TARGET=esp32s3
 make espidf-build ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_PORT=/dev/ttyACM0
-make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
+make console TTY=/dev/ttyACM0
 ```
 
 #### 6. Build and run on the ESP32-C6
@@ -97,7 +96,7 @@ make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
 make espidf-install ESPIDF_TARGET=esp32c6
 make espidf-build ESPIDF_TARGET=esp32c6
 make espidf-flash ESPIDF_PORT=/dev/ttyUSB0
-make espidf-monitor ESPIDF_PORT=/dev/ttyUSB0
+make console TTY=/dev/ttyUSB0
 ```
 
 ---
