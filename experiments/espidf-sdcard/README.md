@@ -127,7 +127,7 @@ make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6
 make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6 ESPIDF_PORT=/dev/ttyUSB0
 ```
 
-Connect via serial terminal (`picocom -b 115200 /dev/ttyUSB0` or `/dev/ttyACM0`) or through the `board` MCP server.
+Connect via serial console (`make console TTY=/dev/ttyUSB0` or `TTY=/dev/ttyACM0`) or through the `board` MCP server.
 
 ### Host Tests
 

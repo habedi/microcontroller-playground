@@ -83,10 +83,10 @@ make espidf-install ESPIDF_TARGET=esp32s3
 make espidf-build ESPIDF_TARGET=esp32s3
 ```
 
-3. Flash and open the serial monitor:
+3. Flash and open the serial console:
 
 ```shell
 make espidf-flash ESPIDF_PORT=/dev/ttyACM0
-make espidf-monitor ESPIDF_PORT=/dev/ttyACM0
+make console TTY=/dev/ttyACM0
 ```
 

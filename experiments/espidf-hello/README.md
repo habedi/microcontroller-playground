@@ -44,10 +44,10 @@ make espidf-build ESPIDF_TARGET=esp32p4
 
 ```shell
 make espidf-flash ESPIDF_PORT=/dev/ttyUSB0
-make espidf-monitor ESPIDF_PORT=/dev/ttyUSB0
+make console TTY=/dev/ttyUSB0
 ```
 
-`ESPIDF_PORT` defaults to `/dev/ttyACM0` (use `/dev/ttyUSB0` for the ESP32-C6 CP2102N bridge). Leave the monitor with Ctrl-]. The program prints the chip revision, free heap, and an incrementing counter once per second.
+`ESPIDF_PORT` and `TTY` default to `/dev/ttyACM0` (use `/dev/ttyUSB0` for the ESP32-C6 CP2102N bridge). Leave the console with Ctrl-a Ctrl-x. The program prints the chip revision, free heap, and an incrementing counter once per second.
 
 ### Configuration
 

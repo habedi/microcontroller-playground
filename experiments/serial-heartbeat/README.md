@@ -37,7 +37,7 @@ adapter's VDD pin. Only run this when replacing the C6 firmware is intended:
 ```shell
 espflash flash --chip esp32c6 --port /dev/ttyUSB0 \
   build/rust/riscv32imac-unknown-none-elf/release/serial-heartbeat
-picocom -b 115200 /dev/ttyUSB0
+make console TTY=/dev/ttyUSB0
 ```
 
 Expect `Rust heartbeat` once per second after reset. This replaces the SDIO slave

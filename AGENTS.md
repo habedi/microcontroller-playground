@@ -84,7 +84,7 @@ Flashing:
 
 Serial console:
 
-- Open with `picocom -b 115200 /dev/ttyACM0` (requires `dialout` group).
+- Open with `make console TTY=<port>` (runs `picocom` at 115200 baud; requires `dialout` group).
 - Prefer the `tools/board-mcp.py` MCP server, which serializes access, handles contention, and scrubs hardware identifiers. See `docs/board-mcp.md`.
 
 ## Toolchains

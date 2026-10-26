@@ -93,5 +93,5 @@ make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6 ESP
 5. Connect to the shell:
 
 ```shell
-picocom -b 115200 /dev/ttyUSB0
+make console TTY=/dev/ttyUSB0
 ```
