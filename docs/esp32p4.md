@@ -529,7 +529,7 @@ source 22 with the USB console, the RTC returning nonsense after a reset, and th
 error path when `emac_esp32_init` times out.
 
 In the CPython port under `nuttx-apps`, three more. Each one is reproducible on any NuttX RISC-V target, not
-just this board. The host interpreter is built with the cross compiler. `_posixsubprocess` needs a real fork,
+just this board. The host interpreter is built with the cross-compiler. `_posixsubprocess` needs a real fork,
 because CPython's vfork path is Linux-only. And thread-local storage needs two changes at once: the target needs
 `-ftls-model=local-exec` to link, and the configuration needs `CONFIG_SCHED_THREAD_LOCAL` to run.
 

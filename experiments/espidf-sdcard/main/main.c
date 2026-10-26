@@ -44,7 +44,9 @@
 #include "esp_netif_sntp.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#if CONFIG_SPIRAM
 #include "esp_psram.h"
+#endif
 #include "esp_system.h"
 #include "esp_vfs_fat.h"
 #include "esp_wifi.h"
@@ -58,6 +60,7 @@
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
 #include "sdmmc_cmd.h"
+#include "soc/rtc.h"
 
 #if CONFIG_IDF_TARGET_ESP32P4
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
@@ -133,7 +136,7 @@ static int cmd_cd(int argc, char **argv)
   char target[sizeof(s_cwd)];
   if (argc < 2)
     {
-      snprintf(target, sizeof(target), "%s", SDCARD_MOUNT_POINT);
+      snprintf(target, sizeof(target), "%s", SHELL_HOME);
     }
   else if (!resolve_arg("cd", argv[1], target, sizeof(target)))
     {
@@ -711,7 +714,9 @@ static int cmd_free(int argc, char **argv)
   } tiers[] = {
     {"Internal SRAM",   MALLOC_CAP_INTERNAL},
     {"DMA-capable",     MALLOC_CAP_DMA},
+#if CONFIG_SPIRAM
     {"SPI RAM (PSRAM)", MALLOC_CAP_SPIRAM},
+#endif
   };
 
   for (size_t i = 0; i < sizeof(tiers) / sizeof(tiers[0]); i++)
@@ -733,6 +738,7 @@ static int cmd_free(int argc, char **argv)
   printf("  Minimum free:     %10lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
   printf("  Largest block:    %10zu bytes\n", heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 
+#if CONFIG_SPIRAM
   if (esp_psram_is_initialized())
     {
       size_t psram_size = esp_psram_get_size();
@@ -742,6 +748,9 @@ static int cmd_free(int argc, char **argv)
     {
       printf("  PSRAM Physical:   Disabled / Not initialized\n");
     }
+#else
+  printf("  PSRAM Physical:   Not supported on this target\n");
+#endif
 
   return 0;
 }
@@ -756,7 +765,11 @@ static int cmd_cpuinfo(int argc, char **argv)
   uint32_t xtal_freq_hz = 0;
 
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &cpu_freq_hz);
+#if CONFIG_IDF_TARGET_ESP32C6
+  apb_freq_hz = rtc_clk_apb_freq_get();
+#else
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &apb_freq_hz);
+#endif
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &xtal_freq_hz);
 
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -774,6 +787,17 @@ static int cmd_cpuinfo(int argc, char **argv)
   printf("Tightly Coupled RAM:   128 KB zero-wait-state HP TCM\n");
   printf("ISA Features:          FPU (Single-precision), Packed-SIMD DSP, 128-bit AI SIMD (PIE),\n"
          "                       Hardware Loops, Atomic (A), Compressed (C)\n");
+#elif CONFIG_IDF_TARGET_ESP32C6
+  printf("CPU Architecture:      RISC-V 32-bit (RV32IMAC)\n");
+  printf("Target Chip:           ESP32-C6 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
+  printf("High-Performance Core: %d core (Active Core ID: %d)\n", chip_info.cores, esp_cpu_get_core_id());
+  printf("Low-Power Core:        1 core (RV32IMC @ up to 20 MHz)\n");
+  printf("CPU Clock Frequency:   %lu MHz (XTAL: %lu MHz, APB: %lu MHz)\n",
+         (unsigned long)(cpu_freq_hz / 1000000),
+         (unsigned long)(xtal_freq_hz / 1000000),
+         (unsigned long)(apb_freq_hz / 1000000));
+  printf("Instruction Cache:     32 KB L1 I-Cache\n");
+  printf("ISA Features:          Integer (I), Multiply/Divide (M), Atomic (A), Compressed (C)\n");
 #else
   printf("CPU Architecture:      Xtensa 32-bit LX7\n");
   printf("Target Chip:           ESP32-S3 (Revision v%d.%d)\n", chip_info.revision / 100, chip_info.revision % 100);
@@ -2121,12 +2145,12 @@ void app_main(void)
   /* Leave room for filesystem completion and command handlers. */
   repl_config.task_stack_size = 16384;
 
-#if CONFIG_IDF_TARGET_ESP32P4
-  esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-  ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
-#else
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
   esp_console_dev_usb_serial_jtag_config_t jtag_config = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&jtag_config, &repl_config, &repl));
+#else
+  esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+  ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
 #endif
 
   /* Force enable raw mode for readline, arrow keys, history, and tab completion */
@@ -2167,6 +2191,10 @@ void app_main(void)
   printf("  ESP32-P4 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
   printf("  Storage: /sdcard (FATFS), /data (LittleFS)\n");
   printf("  Network: Wi-Fi STA via ESP32-C6 coprocessor\n");
+#elif CONFIG_IDF_TARGET_ESP32C6
+  printf("  ESP32-C6 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
+  printf("  Storage: /data (LittleFS)\n");
+  printf("  Network: Wi-Fi 6 STA on the onboard radio\n");
 #else
   printf("  ESP32-S3 Workstation Shell (ESP-IDF v%s)\n", esp_get_idf_version());
   printf("  Storage: /data (LittleFS)\n");

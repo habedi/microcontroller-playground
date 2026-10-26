@@ -1,6 +1,33 @@
 /* Include the editor to exercise its internal logic without a serial port. */
 #define _POSIX_C_SOURCE 200809L
+#include <errno.h>
+#include <stdlib.h>
+
+static int allocations_before_failure = -1;
+
+static int fail_allocation(void)
+{
+  if (allocations_before_failure < 0) return 0;
+  if (allocations_before_failure-- > 0) return 0;
+  errno = ENOMEM;
+  return 1;
+}
+
+static void *test_malloc(size_t size)
+{
+  return fail_allocation() ? NULL : malloc(size);
+}
+
+static void *test_realloc(void *ptr, size_t size)
+{
+  return fail_allocation() ? NULL : realloc(ptr, size);
+}
+
+#define malloc test_malloc
+#define realloc test_realloc
 #include "../main/editor.c"
+#undef malloc
+#undef realloc
 
 #include <assert.h>
 
@@ -61,6 +88,94 @@ static void test_split_crlf(const char *filename)
   assert(strcmp(E.row[1].chars, "end\r") == 0);
 }
 
+static void assert_original_rows(int cx, int cy)
+{
+  assert(E.numrows == 2);
+  assert(E.cx == cx && E.cy == cy);
+  assert(E.row[0].size == 5 && strcmp(E.row[0].chars, "first") == 0);
+  assert(E.row[1].size == 6 && strcmp(E.row[1].chars, "second") == 0);
+  assert(E.dirty == 0);
+  assert(strstr(E.statusmsg, "memory") != NULL);
+}
+
+static void test_edit_allocation_failures(void)
+{
+  reset_editor();
+  assert(editorInsertRow(0, "first", 5));
+  assert(editorInsertRow(1, "second", 6));
+  E.dirty = 0;
+  E.cx = 2;
+
+  for (int fail = 0; fail < 2; fail++) {
+    allocations_before_failure = fail;
+    editorInsertNewline();
+    allocations_before_failure = -1;
+    assert_original_rows(2, 0);
+  }
+
+  allocations_before_failure = 0;
+  editorInsertChar('x');
+  allocations_before_failure = -1;
+  assert_original_rows(2, 0);
+
+  E.cx = 0;
+  E.cy = 1;
+  allocations_before_failure = 0;
+  editorDelChar();
+  allocations_before_failure = -1;
+  assert_original_rows(0, 1);
+
+  E.cy = 2;
+  for (int fail = 0; fail < 2; fail++) {
+    allocations_before_failure = fail;
+    editorInsertChar('x');
+    allocations_before_failure = -1;
+    assert_original_rows(0, 2);
+    allocations_before_failure = fail;
+    editorInsertNewline();
+    allocations_before_failure = -1;
+    assert_original_rows(0, 2);
+  }
+
+  editorInsertChar('x');
+  assert(E.numrows == 3 && strcmp(E.row[2].chars, "x") == 0);
+
+  struct abuf ab = ABUF_INIT;
+  abAppend(&ab, "old", 3);
+  allocations_before_failure = 0;
+  abAppend(&ab, "new", 3);
+  allocations_before_failure = -1;
+  abAppend(&ab, "ignored", 7);
+  assert(ab.failed && ab.len == 3 && memcmp(ab.b, "old", 3) == 0);
+  abFree(&ab);
+}
+
+static void test_load_allocation_failures(const char *filename)
+{
+  test_long_line(filename, -1, false);
+  reset_editor();
+  for (int fail = 0; fail < 6; fail++) {
+    allocations_before_failure = fail;
+    assert(editor_open(filename) == 1);
+    allocations_before_failure = -1;
+    assert(E.row == NULL && E.numrows == 0);
+    FILE *fp = fopen(filename, "r");
+    assert(fp);
+    for (int i = 0; i < 1024; i++) assert(fgetc(fp) == 'a');
+    assert(fgetc(fp) == '\n');
+    assert(fclose(fp) == 0);
+  }
+  char missing[512];
+  snprintf(missing, sizeof(missing), "%s.missing", filename);
+  for (int fail = 0; fail < 2; fail++) {
+    allocations_before_failure = fail;
+    assert(editor_open(missing) == 1);
+    allocations_before_failure = -1;
+    assert(E.row == NULL && E.numrows == 0);
+    assert(access(missing, F_OK) == -1 && errno == ENOENT);
+  }
+}
+
 int main(void)
 {
   char filename[] = "/tmp/editor-test-XXXXXX";
@@ -72,6 +187,8 @@ int main(void)
   test_long_line(filename, 510, false);
   test_long_line(filename, 1021, true);
   test_split_crlf(filename);
+  test_edit_allocation_failures();
+  test_load_allocation_failures(filename);
   reset_editor();
   assert(unlink(filename) == 0);
   puts("Editor tests passed");

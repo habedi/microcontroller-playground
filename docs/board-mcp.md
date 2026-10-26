@@ -43,6 +43,10 @@ tell a slow write from a board that has stopped answering.
 
 It opens the port for one command and closes it again, so a terminal can still
 be used between calls.
+Calls use a per-user, per-port file lock for the whole conversation, including prompt synchronization and closing the port.
+The lock lives in `XDG_RUNTIME_DIR`, or the temporary directory when that variable is unset.
+Run MCP servers and hooks with the same runtime directory so they share the lock.
+Exclusive serial access also rejects another cooperating program that already holds the port.
 
 ### What It Withholds
 
@@ -74,3 +78,6 @@ Against the Pico 2 WH running the `usbnsh-lcd-wifi` image:
   the state afterwards.
 - A `wapi scan` is summarised, and the count was checked against the unscrubbed
   output.
+
+Host regression tests in `experiments/pico-face/test/test_host_tools.py` use simulated serial ports.
+They check that separate processes wait until the conversation closes and that errors release the port and lock.

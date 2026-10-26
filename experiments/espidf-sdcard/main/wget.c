@@ -1,13 +1,18 @@
 #include "wget.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_random.h"
 
 struct download_output {
   FILE *stream;
@@ -27,6 +32,53 @@ static esp_err_t download_event(esp_http_client_event_t *event)
   return ESP_OK;
 }
 
+static int publish_download(const char *temporary, const char *backup, const char *path)
+{
+  if (rename(temporary, path) == 0) return 0;
+  if (errno != EEXIST) return -1;
+
+  /* FAT cannot replace a file with rename; keep the old file until publication succeeds. */
+  /* shortcut: replacement is not atomic; add boot recovery if power loss must be handled without manual recovery. */
+  if (rename(path, backup) != 0) return -1;
+
+  /* Inspect the object actually moved, inside the staging directory we own. */
+  int error = 0;
+  int fd = open(backup, O_RDONLY | O_NONBLOCK | O_NOFOLLOW);
+  if (fd < 0) {
+    error = errno;
+  } else {
+    struct stat st;
+    if (fstat(fd, &st) != 0) error = errno;
+    else if (!S_ISREG(st.st_mode)) error = EISDIR;
+    if (close(fd) != 0 && error == 0) error = errno;
+  }
+  if (error == 0 && rename(temporary, path) == 0) {
+    if (unlink(backup) != 0)
+      fprintf(stderr, "wget: could not remove previous file at %s\n", backup);
+    return 0;
+  }
+  if (error == 0) error = errno;
+  if (rename(backup, path) != 0)
+    fprintf(stderr, "wget: previous output preserved at %s\n", backup);
+  errno = error;
+  return -1;
+}
+
+static int create_staging_directory(const char *path, char *staging, size_t size)
+{
+  for (int attempt = 0; attempt < 8; attempt++) {
+    int len = snprintf(staging, size, "%s.part%08" PRIx32, path, esp_random());
+    if (len < 0 || (size_t)len >= size) {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
+    if (mkdir(staging, 0700) == 0) return 0;
+    if (errno != EEXIST) return -1;
+  }
+  errno = EEXIST;
+  return -1;
+}
+
 int wget_download(const char *url, const char *path)
 {
   if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)
@@ -35,21 +87,25 @@ int wget_download(const char *url, const char *path)
       return 1;
     }
 
-  char temporary[528] = "";
+  char staging[528] = "";
+  char temporary[sizeof(staging) + 4];
+  char backup[sizeof(staging) + 4];
   FILE *stream = stdout;
   bool to_stdout = strcmp(path, "-") == 0;
   if (!to_stdout)
     {
-      int len = snprintf(temporary, sizeof(temporary), "%s.partXXXXXX", path);
-      if (len < 0 || (size_t)len >= sizeof(temporary))
+      if (create_staging_directory(path, staging, sizeof(staging)) != 0)
         {
-          fprintf(stderr, "wget: output path too long\n");
+          perror("wget: cannot create staging directory");
           return 1;
         }
-      int fd = mkstemp(temporary);
+      snprintf(temporary, sizeof(temporary), "%s/new", staging);
+      snprintf(backup, sizeof(backup), "%s/old", staging);
+      int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0600);
       if (fd < 0)
         {
           perror("wget: cannot create output");
+          rmdir(staging);
           return 1;
         }
       stream = fdopen(fd, "wb");
@@ -57,6 +113,7 @@ int wget_download(const char *url, const char *path)
         {
           close(fd);
           unlink(temporary);
+          rmdir(staging);
           perror("wget: cannot open output");
           return 1;
         }
@@ -101,12 +158,14 @@ int wget_download(const char *url, const char *path)
   if (!to_stdout)
     {
       /* Publish only a complete response, preserving any existing destination on failure. */
-      if (!failed && rename(temporary, path) != 0)
+      if (!failed && publish_download(temporary, backup, path) != 0)
         {
           perror("wget: cannot replace output");
           failed = true;
         }
       if (failed) unlink(temporary);
+      if (rmdir(staging) != 0)
+        fprintf(stderr, "wget: recovery directory retained at %s\n", staging);
     }
   return failed ? 1 : 0;
 }

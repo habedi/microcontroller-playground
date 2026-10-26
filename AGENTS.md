@@ -24,6 +24,8 @@ The boards connect over USB to a Linux development machine (amd64 or arm64):
   `raspberrypi-pico-2`. The `usbnsh` configuration provides console over USB. See `docs/raspberrypi-pico-2.md`.
 - Waveshare ESP32-S3-Zero: ESP32-S3FH8R8 (dual-core Xtensa LX7, 8 MB flash, 8 MB Octal PSRAM) with an onboard WS2812 RGB LED on GPIO 21.
   USB-C links directly to the internal USB Serial/JTAG controller (`/dev/ttyACM0`, vendor `303a`). See `docs/esp32s3.md`.
+- ESP32-C6-DevKitC-1: ESP32-C6-WROOM-1-N8 (single-core 32-bit RISC-V, 8 MB flash) with native Wi-Fi 6, Bluetooth 5 (LE), and 802.15.4 (Zigbee and Thread).
+  Dual USB-C ports link to either a Silicon Labs CP2102N UART bridge (`/dev/ttyUSB0`, vendor `10c4`) or internal USB Serial/JTAG (`/dev/ttyACM0`, vendor `303a`). See `docs/esp32c6.md`.
 - 40-pin male-to-female Dupont jumper wires, 30 cm, for peripheral wiring.
 
 ## Core Rules
@@ -82,7 +84,7 @@ Flashing:
 
 Serial console:
 
-- Open with `picocom -b 115200 /dev/ttyACM0` (requires `dialout` group).
+- Open with `make console TTY=<port>` (runs `picocom` at 115200 baud; requires `dialout` group).
 - Prefer the `tools/board-mcp.py` MCP server, which serializes access, handles contention, and scrubs hardware identifiers. See `docs/board-mcp.md`.
 
 ## Toolchains

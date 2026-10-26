@@ -22,11 +22,14 @@ returned. See the Privacy section of AGENTS.md.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import serial
@@ -133,8 +136,21 @@ def _clean(raw: str, command: str) -> str:
 
 
 def _converse(command: str, timeout_s: float) -> str:
+    port_key = hashlib.sha256(os.fsencode(os.path.realpath(PORT))).hexdigest()[:16]
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    lock_path = os.path.join(runtime, f"board-{os.getuid()}-{port_key}.lock")
     try:
-        port = serial.Serial(PORT, BAUD, timeout=0.2)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return _exchange(command, timeout_s)
+    except OSError as exc:
+        return f"cannot access {PORT}: {exc}"
+
+
+def _exchange(command: str, timeout_s: float) -> str:
+    try:
+        port = serial.Serial(PORT, BAUD, timeout=0.2, exclusive=True)
     except serial.SerialException as exc:
         return (
             f"cannot open {PORT}: {exc}\n"

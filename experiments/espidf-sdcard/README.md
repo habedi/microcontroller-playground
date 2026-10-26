@@ -1,12 +1,12 @@
 ## ESP-IDF Workstation Shell
 
-ESP-IDF experiment providing an interactive NSH-compatible command shell with filesystem storage, wireless networking, and an in-terminal text editor across both the ESP32-P4 and the ESP32-S3.
+ESP-IDF experiment providing an interactive NSH-compatible command shell with filesystem storage, wireless networking, and an in-terminal text editor across the ESP32-P4, the ESP32-S3, and the ESP32-C6.
 
-- Boards: Waveshare ESP32-P4-WIFI6 (chip revision v1.3), Waveshare ESP32-S3-Zero
+- Boards: Waveshare ESP32-P4-WIFI6 (chip revision v1.3), Waveshare ESP32-S3-Zero, Espressif ESP32-C6-DevKitC-1-N8
 - OS: FreeRTOS, through ESP-IDF v6.1
-- Storage: 128 GB MicroSD card at `/sdcard` (FATFS) and 12 MB LittleFS at `/data` on ESP32-P4; 2.375 MB LittleFS at `/data` on ESP32-S3
-- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO on ESP32-P4; native on-chip 2.4 GHz Wi-Fi on ESP32-S3
-- Console: interactive REPL with `nsh> ` prompt on UART0 (ESP32-P4) or USB Serial/JTAG (ESP32-S3)
+- Storage: 128 GB MicroSD card at `/sdcard` (FATFS) and 12 MB LittleFS at `/data` on ESP32-P4; 2.375 MB LittleFS at `/data` on ESP32-S3 and ESP32-C6
+- Wireless: Wi-Fi STA stack driven through onboard ESP32-C6 over SDIO on ESP32-P4; native on-chip 2.4 GHz Wi-Fi on ESP32-S3; native on-chip 2.4 GHz Wi-Fi 6 on ESP32-C6
+- Console: interactive REPL with `nsh> ` prompt on UART0 (ESP32-P4, ESP32-C6) or USB Serial/JTAG (ESP32-S3)
 
 ### Hardware Configuration
 
@@ -23,9 +23,15 @@ ESP32-S3 (Waveshare ESP32-S3-Zero):
 - Wireless: native on-chip 2.4 GHz 802.11 b/g/n radio.
 - Console: internal USB Serial/JTAG controller routed directly to the USB-C port.
 
+ESP32-C6 (Espressif ESP32-C6-DevKitC-1-N8):
+
+- Internal storage: 2.375 MB LittleFS partition on onboard 8 MB NOR flash at offset `0x5a0000`.
+- Wireless: native on-chip 2.4 GHz 802.11ax/b/g/n Wi-Fi 6 radio.
+- Console: Silicon Labs CP2102N UART bridge on UART0 (`/dev/ttyUSB0`) or internal USB Serial/JTAG (`/dev/ttyACM0`).
+
 ### Interactive Commands
 
-The firmware runs `esp_console` (UART0 on ESP32-P4, USB Serial/JTAG on ESP32-S3) with prompt `nsh> `.
+The firmware runs `esp_console` (UART0 on ESP32-P4 and ESP32-C6, USB Serial/JTAG on ESP32-S3) with prompt `nsh> `.
 Readline support provides command history with Up/Down arrows, in-line editing with Left/Right arrows, and Tab autocompletion for both command names and file paths across `/sdcard` and `/data`.
 Path completion accepts quoted or escaped spaces and escapes suggested filenames for the command parser.
 Suggestions that exceed the console line limit are omitted.
@@ -92,11 +98,14 @@ wget -O /data/example.html https://example.com
 wget -O - https://example.com
 ```
 
-Downloads stream to a temporary file and are published only after the response is complete.
+Downloads stream to a file inside a private staging directory beside the destination and are published only after the response is complete.
 Network errors, HTTP error responses, and write failures leave an existing destination unchanged.
-On the SD card, use a new output filename or remove the old file first: FATFS does not replace files during rename.
 Console output streams directly and can contain a partial response if the request fails.
 This command implements only the `-O` download form.
+On FAT, replacing an existing file moves the old output into the staging directory because FAT cannot replace files with `rename`.
+The moved output is checked through its file descriptor before publishing the download.
+If replacement and recovery both fail, the command prints the backup path so the old file can be recovered.
+A power loss during replacement can leave a `<output>.part<random>` directory containing `old`, `new`, or both; replacement on FAT is not atomic.
 
 ### Build and Flash
 
@@ -114,7 +123,14 @@ make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32s3 ESPIDF_PORT=/dev/ttyACM0
 ```
 
-Connect via serial terminal (`picocom -b 115200 /dev/ttyACM0`) or through the `board` MCP server.
+Build for ESP32-C6:
+
+```shell
+make espidf-build ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6
+make espidf-flash ESPIDF_SRC=experiments/espidf-sdcard ESPIDF_TARGET=esp32c6 ESPIDF_PORT=/dev/ttyUSB0
+```
+
+Connect via serial console (`make console TTY=/dev/ttyUSB0` or `TTY=/dev/ttyACM0`) or through the `board` MCP server.
 
 ### Host Tests
 
@@ -129,6 +145,24 @@ They cover quoted paths, escaped filenames, long prefixes, and accepting a compl
 The autocomplete fixes passed sanitized host tests and an ESP32-P4 firmware build; they have not been verified on the board.
 Download tests cover binary bodies, redirects, incomplete transfers, HTTP errors, and output failures.
 The `wget` host tests and ESP32-P4 firmware build passed; the new command has not been flashed or verified on hardware.
+Regression tests cover editor allocation failures, download replacement with FAT rename rules, and failed replacement recovery.
+Download race tests replace the destination with a directory, symlink, or FIFO before the backup move.
+They also check that a competing destination is preserved and that the previous output remains recoverable.
+Staging directory collision tests check that existing directories are not changed and that repeated collisions stop safely.
+The shell copy tests run the SDK's FatFS on a RAM disk with the repository's filename and locking options.
+They check case aliases, short filename aliases, source preservation, and the home directory for each board.
+`CONFIG_FATFS_FS_LOCK=6` prevents writes through aliases of an open source file and allows the six directory levels used by `tree`.
+Run `make espidf-distclean ESPIDF_SRC=experiments/espidf-sdcard` before rebuilding an existing build directory to apply the new default.
+These regression tests and clean ESP32-P4, ESP32-S3, and ESP32-C6 firmware builds passed.
+The image was flashed to the standalone ESP32-C6-DevKitC-1, and flash hash verification passed.
+The shell booted with `/data` mounted, and bare `cd` succeeded on the C6.
+The S3 image was also flashed with hash verification, and its shell and bare `cd` check passed over native USB.
+The P4 image was flashed with hash verification, and both filesystems mounted.
+Bare `cd` restored `/sdcard` from `/data`.
+An SD card copy through a case alias was rejected with the source preserved, and an ordinary copy succeeded with matching contents.
+Temporary verification files were removed; the onboard C6 wireless firmware was not changed.
+Editor allocation failures and FAT download replacement recovery remain covered by host tests.
+The later download staging race fix passed sanitized host tests and firmware builds for all three ESP32 targets; it has not been flashed.
 
 Run `make -C experiments/espidf-sdcard/test test-retawq-tls` for the HTTPS tests.
 This target uses uv's `test` dependency group for mbedTLS's Python code generators.

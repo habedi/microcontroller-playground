@@ -7,6 +7,9 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 # Long filename support in FatFS.
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+# Reject writes through another name for an already open file, including FAT aliases.
+# tree keeps up to six directories open at once.
+CONFIG_FATFS_FS_LOCK=6
 
 # FreeRTOS task tracing and runtime stats for ps and top commands.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
