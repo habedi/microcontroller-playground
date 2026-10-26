@@ -40,15 +40,5 @@ espflash flash --chip esp32c6 --port /dev/ttyUSB0 \
 make console TTY=/dev/ttyUSB0
 ```
 
-Expect `Rust heartbeat` once per second after reset. This replaces the SDIO slave
-firmware and stops P4 wireless access. Restore it with the procedure in the board
-notes after the experiment.
-
-### Status
-
-The firmware builds in the Nix dev shell. It has not been flashed or verified on
-hardware. The loop only calls HAL and console functions; there is no hardware-free
-logic to unit test.
-
-The ESP32-P4 v1.3 on this board is not a target for this experiment. Current esp-hal
-P4 support uses revision v3.x clock and ROM interfaces. Lowering its minimum revision setting does not provide support for earlier silicon.
+Expect `Rust heartbeat` once per second after reset. This replaces the SDIO slave firmware and stops P4 wireless access.
+Restore it with the procedure in the board notes after the experiment.

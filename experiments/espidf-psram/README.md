@@ -57,9 +57,3 @@ CONFIG_SPIRAM_SPEED_200M=y
 option. 200 MHz is the default and the board's rated speed.
 
 Nothing needs to be done about power. ESP-IDF reserves LDO channel 2 at 1.8 V for PSRAM by default.
-
-### What This Settles
-
-An ESPHome report against this same board and revision describes a load access fault at `0x5008e1a0` whenever
-any PSRAM configuration was present. See https://github.com/esphome/esphome/issues/16903. It does not
-reproduce here under ESP-IDF v6.1, so the silicon can drive its PSRAM.

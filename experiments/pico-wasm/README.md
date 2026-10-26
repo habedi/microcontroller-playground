@@ -93,10 +93,3 @@ nsh> iwasm -f fib /data/main.wasm 10
 ```
 
 `0x2a` is 42 (15 + 27), and `0x37` is 55 (`fib(10)`).
-
-### What It Showed
-
-- WAMR loaded and parsed the 180 byte `.wasm` module directly from `/data` LittleFS flash storage.
-- Function calls executed with arguments passed from the shell command line, returning typed results (`0x2a:i32` for 42 and `0x37:i32` for 55).
-- WebAssembly modules must constrain their linear memory with `-Wl,-z,stack-size=4096 -Wl,--initial-memory=65536 -Wl,--max-memory=131072`. The `wasm-ld` default requests 16 pages (1 MB), which exceeds the RP2350 SRAM and fails with `allocate linear memory failed`.
-- The file was transferred over Zmodem without reflashing and survived reboots on the LittleFS volume.
