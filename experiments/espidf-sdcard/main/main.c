@@ -60,6 +60,7 @@
 #include "nvs_flash.h"
 #include "ping/ping_sock.h"
 #include "sdmmc_cmd.h"
+#include "soc/rtc.h"
 
 #if CONFIG_IDF_TARGET_ESP32P4
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
@@ -764,7 +765,11 @@ static int cmd_cpuinfo(int argc, char **argv)
   uint32_t xtal_freq_hz = 0;
 
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_CPU, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &cpu_freq_hz);
+#if CONFIG_IDF_TARGET_ESP32C6
+  apb_freq_hz = rtc_clk_apb_freq_get();
+#else
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_APB, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &apb_freq_hz);
+#endif
   esp_clk_tree_src_get_freq_hz(SOC_MOD_CLK_XTAL, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &xtal_freq_hz);
 
 #if CONFIG_IDF_TARGET_ESP32P4
