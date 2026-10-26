@@ -23,20 +23,21 @@ This is a playground for my microcontroller projects and experiments.
 
 ### Quickstart
 
-For the steps below to work, you need to have Git, Nix, and GNU Make installed on your system.
+> [!IMPORTANT]
+> To follow the steps below, you mainly need to have [Nix](https://nixos.org/download/) installed on your machine.
 
-#### 1. Clone the repository
+#### 1. Set up the development environment
+
+```shell
+nix develop
+```
+
+#### 2. Clone the repository
 
 ```shell
 git clone https://github.com/habedi/microcontroller-playground
 cd microcontroller-playground
 make submodules
-```
-
-#### 2. Enter the development environment
-
-```shell
-make shell
 ```
 
 > [!IMPORTANT]
