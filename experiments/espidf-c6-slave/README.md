@@ -71,8 +71,3 @@ are unrelated to the P4-side numbers, which are CLK 18, CMD 19, and D0 through D
 The console is on the C6's UART0, which the same `PROG_C6` header exposes, so the chip's own boot log is
 readable with the adapter already wired for flashing. That log is the first thing to look at, before flashing
 anything: silence and a boot log point at different faults.
-
-### What Is Untested
-
-Everything past the build. Whether the C6 accepts the firmware, whether it then enumerates, and whether the P4
-reaches it are all open until the adapter arrives.

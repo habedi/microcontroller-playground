@@ -80,7 +80,7 @@ a chip that is not running from one running the wrong firmware.
 
 ### Pins
 
-The SDIO pins are set explicitly, because the library's example targets a different board and uses GPIO 47
+The SDIO pins are set explicitly because the library's example targets a different board and uses GPIO 47
 through 52. On this board they are CLK 18, CMD 19, D0 14, D1 15, D2 16, D3 17, with reset on 54. Leave the boot
-pin out of any repeat of this test, or point it at a pin that is actually connected, since GPIO53 drives audio
+pin out of any repeat of this test or point it at a pin that is actually connected, since GPIO53 drives audio
 hardware.

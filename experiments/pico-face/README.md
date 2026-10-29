@@ -278,13 +278,3 @@ Two limits:
   provide no structured error flag.
 - Spool and lock paths use `XDG_RUNTIME_DIR` or `/tmp` so the hook and pusher
   agree on file locations regardless of context.
-
-### Not Done Yet
-
-- The change tracker reports one box. Two blinking eyes become a band the
-  width of the face, and a blink plus a mouth change becomes most of the
-  panel. Two boxes, or a box per eye, would cut the last part of the bus
-  time, at the cost of a second update call per frame.
-- Brightness dims the rendered pixels rather than the backlight. The backlight
-  pad is a plain GPIO in the board glue and only knows on and off, so real
-  dimming means moving that pin to `RP23XX_PWM`.

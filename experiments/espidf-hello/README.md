@@ -59,7 +59,3 @@ Target-specific settings are separated into dedicated defaults files:
 - `sdkconfig.defaults.esp32p4`: Configures compatibility with silicon revision v1.3 (`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` and `CONFIG_ESP32P4_REV_MIN_100=y`) and routes console to UART0 for the onboard CH343 bridge.
 
 The resolved `sdkconfig` is generated inside the build directory.
-
-### Why This Exists Alongside NuttX
-
-NuttX on the ESP32-P4 completes `nx_start()` and then stops while attaching the USB Serial/JTAG console interrupt. Building the vendor ESP-IDF stack confirms whether the underlying hardware and silicon function properly: if this program runs, the issue lies in the NuttX port rather than the board.

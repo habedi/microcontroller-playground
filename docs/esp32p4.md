@@ -3,8 +3,7 @@
 The custom configurations and patches described here were removed from the repository.
 Their names below refer to historical experiments; the files remain available in Git history.
 
-Notes on bringing up Apache NuttX on the ESP32-P4 function EV board, with 32 MB of PSRAM, headers, and an
-onboard ESP32-C6 wireless coprocessor.
+Notes on bringing up Apache NuttX on the ESP32-P4 function EV board, with 32 MB of PSRAM, headers, and an onboard ESP32-C6 wireless coprocessor.
 
 ### Status
 
@@ -405,15 +404,15 @@ unreachable. Declaring 32 MB and extending the partition to `0x1ef0000` gives a 
 
 Measured with `dd` over 4 MB:
 
-| Configuration | Write | Read |
-| --- | --- | --- |
-| 1 KB cache, 4 KB blocks | 132 KB/s | 2884 KB/s |
-| 4 KB cache, 4 KB blocks | 131 KB/s | 3976 KB/s |
+| Configuration            | Write    | Read      |
+|--------------------------|----------|-----------|
+| 1 KB cache, 4 KB blocks  | 132 KB/s | 2884 KB/s |
+| 4 KB cache, 4 KB blocks  | 131 KB/s | 3976 KB/s |
 | 4 KB cache, 64 KB blocks | 222 KB/s | 6206 KB/s |
 
 Writes are limited by flash erase time rather than by software. At 4 KB blocks, 4 MB took 31.19 seconds for
 1024 blocks, which is 30 ms each and is ordinary sector erase latency, so the cache made no difference to
-writes at all. It did improve reads by 38 percent, and costs only RAM, since cache size is a runtime parameter
+writes at all. It did improve reads by 38 percent and costs only RAM, since cache size is a runtime parameter
 rather than part of the on-disk format.
 
 Raising the block size to 64 KB is the change that moves writes, because one 64 KB block erase replaces sixteen
@@ -454,7 +453,7 @@ So enabling it switches ESP-Hosted off. The two are mutually exclusive, and the 
 `ESP_WIFI_CONTROLLER_TARGET="esp32"` rather than a C6. It builds cleanly and produces an image that can never
 reach the radio.
 
-With the correct pairing the host side works and selects SDIO slot 1 (CLK: GPIO 18, CMD: GPIO 19, D0 through D3:
+With the correct pairing, the host side works and selects SDIO slot 1 (CLK: GPIO 18, CMD: GPIO 19, D0 through D3:
 GPIO 14 through 17, and RESET: GPIO 54).
 
 On initial bring-up, the C6 failed to enumerate (`returned 0x107`). Connecting a 3.3 V USB-to-UART adapter to
@@ -496,7 +495,7 @@ enough to make that HAL support this chip.
 The stock `python` configuration produces real CPython 3.13.0 with pip. It builds, and the 15 MB image boots with
 `python` among the builtin apps. Running it faults.
 
-The cause is the thread pointer. CPython keeps interpreter state in `__thread` variables. Debug assertions show a
+The cause is the thread pointer. CPython keeps the interpreter state in `__thread` variables. Debug assertions show a
 load from address zero in `_PyThreadState_Attach`, and the register dump shows `TP: 00000000`. NuttX sets the
 RISC-V thread pointer only when `CONFIG_SCHED_THREAD_LOCAL` is enabled, at `riscv_initialstate.c:122`.
 

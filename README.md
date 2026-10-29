@@ -23,20 +23,20 @@ This is a playground for my microcontroller projects and experiments.
 
 ### Quickstart
 
-To follow the steps below, you need to have [Nix](https://nixos.org/download/) installed on your machine.
+To follow the steps below, you need to have Git and [Nix](https://nixos.org/download/) (with flakes enabled) installed on your machine.
 
-#### 1. Set up the development environment
-
-```shell
-nix develop
-```
-
-#### 2. Clone the repository
+#### 1. Clone the repository
 
 ```shell
 git clone https://github.com/habedi/microcontroller-playground
 cd microcontroller-playground
 make submodules
+```
+
+#### 2. Set up the development environment
+
+```shell
+nix develop
 ```
 
 > [!IMPORTANT]
@@ -50,6 +50,7 @@ make submodules
 #### 3. Build and run on the Pico 2
 
 ```shell
+# Apache NuttX-based firmware
 make nuttx-configure BOARD=raspberrypi-pico-2:usbnsh
 make nuttx-build
 make flash-pico-uf2             # Hold the BOOTSEL button pressed down while plugging the board in
@@ -65,6 +66,7 @@ Press Enter twice after opening the console to reach the `nsh>` prompt.
 #### 4. Build and run on the ESP32-P4
 
 ```shell
+# Apache NuttX-based firmware
 make nuttx-distclean            # Run this whenever you switch boards
 
 make nuttx-configure BOARD=esp32p4-function-ev-board:nsh
@@ -79,10 +81,12 @@ make nuttx-flash-esp PORT=/dev/ttyACM0
 make console TTY=/dev/ttyACM0
 ```
 
+Check out [experiments/espidf-sdcard](experiments/espidf-sdcard) for an ESP-IDF-based example firmware with a lot of features.
+
 #### 5. Build and run on the ESP32-S3
 
 ```shell
-# ESP-IDF C firmware
+# ESP-IDF-based firmware
 make espidf-install ESPIDF_TARGET=esp32s3
 make espidf-build ESPIDF_TARGET=esp32s3
 make espidf-flash ESPIDF_PORT=/dev/ttyACM0
@@ -92,7 +96,7 @@ make console TTY=/dev/ttyACM0
 #### 6. Build and run on the ESP32-C6
 
 ```shell
-# ESP-IDF C firmware
+# ESP-IDF-based firmware
 make espidf-install ESPIDF_TARGET=esp32c6
 make espidf-build ESPIDF_TARGET=esp32c6
 make espidf-flash ESPIDF_PORT=/dev/ttyUSB0

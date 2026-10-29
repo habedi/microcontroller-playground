@@ -73,7 +73,3 @@ If the board fails to enter the bootloader automatically, hold the BOOT button (
 [Cycle 000] Color: Yellow   (R:24, G:24, B:00) | SRAM: 332 KB free | PSRAM: 8192 KB free
 ...
 ```
-
-### Status
-
-The firmware builds cleanly with ESP-IDF v5.3.3 and the Xtensa Rust compiler. Verification on physical hardware requires user authorization to flash over the serial port.

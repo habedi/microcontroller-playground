@@ -45,8 +45,3 @@ make flash-pico-uf2 UF2=build/zig/firmware/gpio-blink.uf2
 
 Expect one complete blink per second on the external LED. This replaces the current
 firmware. It provides no USB serial console.
-
-### Status
-
-The firmware builds in the Nix dev shell. Hardware verification is pending.
-The loop only calls GPIO and timer HAL functions; there is no hardware-free logic to unit test.
