@@ -40,7 +40,7 @@ nix develop
 ```
 
 > [!IMPORTANT]
-> The first `make shell` builds the RISC-V cross-compiler from source.
+> The first `nix develop` builds the RISC-V cross-compiler from source.
 > Run `make shell-pin` afterward to protect it from Nix garbage collection.
 > Espressif boards also need `make install` for esptool.
 

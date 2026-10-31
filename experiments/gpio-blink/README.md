@@ -23,7 +23,7 @@ interface, so the plain Pico 2 template's GP25 blinky must not be used on this b
 From the repository root:
 
 ```shell
-make shell
+nix develop
 make zig-build
 # Or use Zig directly from the root:
 zig build -Doptimize=ReleaseSmall --prefix build/zig
