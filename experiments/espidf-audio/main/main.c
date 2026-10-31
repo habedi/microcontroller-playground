@@ -29,6 +29,7 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "driver/sdmmc_host.h"
+#include "driver/uart.h"
 #include "sdmmc_cmd.h"
 #include "esp_vfs_fat.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
@@ -107,6 +108,7 @@ static bool s_sdcard_mounted = false;
 static float s_current_gain_db = DEFAULT_MIC_GAIN_DB;
 static int s_current_vol = DEFAULT_OUT_VOL;
 static volatile bool s_meter_visual_active = false;
+static volatile bool s_bg_audio_paused = false;
 
 static void wav_header_init(wav_header_t *hdr, uint32_t sample_rate, uint16_t channels, uint32_t data_bytes)
 {
@@ -136,14 +138,10 @@ static void path_with_prefix(const char *in, char *out, size_t out_len)
 
 static bool kbhit(void)
 {
-    int fd = fileno(stdin);
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(fd, &fds);
-    struct timeval tv = { .tv_sec = 0, .tv_usec = 0 };
-    if (select(fd + 1, &fds, NULL, NULL, &tv) > 0) {
-        int c = getchar();
-        (void)c;
+    size_t buffered = 0;
+    if (uart_get_buffered_data_len(UART_NUM_0, &buffered) == ESP_OK && buffered > 0) {
+        uint8_t c = 0;
+        uart_read_bytes(UART_NUM_0, &c, 1, 0);
         return true;
     }
     return false;
@@ -198,17 +196,6 @@ static esp_err_t init_i2s(void)
 
 static esp_err_t init_codec(void)
 {
-    /* Initialize speaker PA control pin */
-    gpio_config_t pa_cfg = {
-        .pin_bit_mask = 1ULL << AUDIO_PA_CTRL_PIN,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&pa_cfg);
-    gpio_set_level(AUDIO_PA_CTRL_PIN, 0);
-
     /* Initialize I2C master bus */
     i2c_master_bus_handle_t i2c_bus = NULL;
     i2c_master_bus_config_t i2c_cfg = {
@@ -394,6 +381,11 @@ static void audio_background_task(void *pvParameters)
     float noise_floor_rms = 100.0f;
 
     while (1) {
+        if (s_bg_audio_paused) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
         size_t bytes_read = 0;
         esp_err_t ret = i2s_channel_read(s_rx_handle, stereo_buf, FRAME_BYTES, &bytes_read, portMAX_DELAY);
         if (ret != ESP_OK || bytes_read != FRAME_BYTES) {
@@ -478,6 +470,7 @@ static int cmd_meter(int argc, char **argv)
 
     printf("Starting live VU meter (%s). Press Enter or any key to stop...\n",
            duration_sec > 0 ? "timed" : "continuous");
+    uart_flush_input(UART_NUM_0);
     s_meter_visual_active = true;
 
     int elapsed_ms = 0;
@@ -541,8 +534,9 @@ static int cmd_rec(int argc, char **argv)
     wav_header_init(&hdr, SAMPLE_RATE_HZ, 1, 0);
     fwrite(&hdr, 1, sizeof(hdr), fp);
 
-    /* Suspend background meter task to gain exclusive RX channel access */
-    vTaskSuspend(s_meter_task_handle);
+    /* Pause background meter task to gain exclusive RX channel access */
+    s_bg_audio_paused = true;
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     int16_t *stereo_buf = malloc(FRAME_BYTES);
     int16_t *mono_buf = malloc(FRAME_SAMPLES * sizeof(int16_t));
@@ -551,7 +545,7 @@ static int cmd_rec(int argc, char **argv)
         free(stereo_buf);
         free(mono_buf);
         fclose(fp);
-        vTaskResume(s_meter_task_handle);
+        s_bg_audio_paused = false;
         return 1;
     }
 
@@ -560,6 +554,7 @@ static int cmd_rec(int argc, char **argv)
     uint32_t last_print_sec = 0;
 
     printf("Recording %d seconds to %s... (Press any key to stop early)\n", seconds, filepath);
+    uart_flush_input(UART_NUM_0);
 
     while (written_samples < total_samples) {
         size_t to_read_samples = FRAME_SAMPLES;
@@ -616,7 +611,7 @@ static int cmd_rec(int argc, char **argv)
     fwrite(&hdr, 1, sizeof(hdr), fp);
     fclose(fp);
 
-    vTaskResume(s_meter_task_handle);
+    s_bg_audio_paused = false;
 
     printf("\nSaved %s: %.2f seconds (%u bytes, 16 kHz 16-bit mono WAV)\n",
            filepath, (double)written_samples / SAMPLE_RATE_HZ, (unsigned)(sizeof(hdr) + data_bytes));
@@ -742,6 +737,7 @@ static int cmd_play(int argc, char **argv)
     }
 
     uint32_t total_played = 0;
+    uart_flush_input(UART_NUM_0);
     while (total_played < hdr.data_size) {
         size_t samples_to_read = FRAME_SAMPLES;
         size_t bytes_to_read = samples_to_read * sizeof(int16_t) * hdr.num_channels;
@@ -1084,14 +1080,13 @@ void app_main(void)
     /* Initialize Interactive REPL Console */
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    repl_config.prompt = "audio> ";
+    repl_config.prompt = "nsh> ";
     repl_config.max_cmdline_length = 256;
     repl_config.task_stack_size = 16384;
 
     esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
 
-    linenoiseSetDumbMode(0);
     register_shell_commands();
 
     printf("\nAudio Shell ready. Storage: %s. Type 'help' for commands.\n\n",

@@ -33,7 +33,7 @@ The Waveshare ESP32-P4-WIFI6 routes audio and MicroSD signals through the follow
 
 ### Interactive Shell Commands
 
-The console prompt (`audio> `) runs over UART0 at 115200 baud with line editing and history:
+The console prompt (`nsh> `) runs over UART0 at 115200 baud with line editing and history:
 
 - `meter [seconds]`: displays the live ASCII VU meter with adaptive background noise tracking and voice activity detection; press any key or Enter to return to the shell.
 - `rec <seconds> [filename.wav]`: records 16 kHz 16-bit mono PCM directly to `/sdcard/<filename>.wav` with real-time peak, RMS, and progress displays.
