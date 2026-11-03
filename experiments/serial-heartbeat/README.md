@@ -9,7 +9,7 @@ per second on the C6 UART0 at 115200 baud. It uses no RTOS, allocator, or Wi-Fi 
 From the repository root:
 
 ```shell
-make shell
+nix develop
 make rust-build
 # Or use Cargo directly from the root:
 cargo build --release --locked -p serial-heartbeat

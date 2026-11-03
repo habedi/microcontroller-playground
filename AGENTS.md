@@ -70,7 +70,7 @@ Python tools are managed by uv via `pyproject.toml` (run with `uv run`). System 
 
 ## Building and Flashing
 
-Builds run inside the Nix dev shell (`make shell`):
+Builds run inside the Nix dev shell (`nix develop`):
 
 1. Configure via `make nuttx-configure BOARD=<board>:<config>`. Defaults: `esp32p4-function-ev-board:nsh` (ESP32-P4) and `raspberrypi-pico-2:nsh`
    (Pico 2).

@@ -42,7 +42,7 @@ sudo apt-get install make
 ```
 
 - Use the `make submodules` command to fetch the git submodules under `external/`.
-- Use the `make shell` command to enter the Nix dev shell, the primary development environment.
+- Use the `nix develop` command to enter the Nix dev shell, the primary development environment.
   On a Debian-based system without Nix, `make setup-deps` installs a partial set of dependencies with apt instead.
 - Use the `make install` command to install the uv-managed Python tools.
 
