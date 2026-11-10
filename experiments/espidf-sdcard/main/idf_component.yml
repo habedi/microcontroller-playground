@@ -5,7 +5,8 @@ dependencies:
     rules:
       - if: "target in [esp32p4]"
   espressif/esp_hosted:
-    version: "^3.0.6"
+    # Keep dependency rules aligned with the locked component's Kconfig.
+    version: "3.0.10"
     rules:
       - if: "target in [esp32p4]"
 
