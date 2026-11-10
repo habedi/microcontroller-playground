@@ -28,9 +28,8 @@ To follow the steps below, you need to have Git, GNU Make, and [Nix](https://nix
 #### 1. Clone the repository
 
 ```shell
-git clone https://github.com/habedi/microcontroller-playground
+git clone --depth=1 --recursive https://github.com/habedi/microcontroller-playground
 cd microcontroller-playground
-make submodules
 ```
 
 #### 2. Set up the development environment
