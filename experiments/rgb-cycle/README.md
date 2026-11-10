@@ -14,7 +14,7 @@ This experiment runs Rust with the ESP-IDF framework on the Waveshare ESP32-S3-Z
 The project requires the Xtensa Rust compiler (`esp` channel) and `ldproxy`. When entering the Nix development shell, the environment is automatically set up if `espup` has run:
 
 ```shell
-make shell
+nix develop
 ```
 
 From the repository root:

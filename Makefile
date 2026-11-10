@@ -73,10 +73,6 @@ help: ## Show help messages for all available targets
 	awk 'BEGIN {FS = ":.*## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 # Setup (OS-agnostic)
-.PHONY: shell
-shell: ## Enter the Nix dev shell (primary development environment)
-	nix develop
-
 .PHONY: shell-pin
 shell-pin: ## Build the dev shell and keep it from being garbage collected
 	nix develop --profile $(DEVSHELL_PROFILE) --command true
@@ -93,7 +89,7 @@ setup-deps: ## Install system dependencies (on Debian-based systems)
 .PHONY: setup-udev
 setup-udev: ## Install the picotool udev rules, so flash-pico runs without sudo
 	@p=$$(command -v picotool) || { \
-		echo "picotool is not on PATH. Enter the dev shell with make shell."; \
+		echo "picotool is not on PATH. Enter the dev shell with nix develop."; \
 		exit 1; }; \
 	rules="$$(dirname $$(readlink -f $$p))/../etc/udev/rules.d/60-picotool.rules"; \
 	test -f "$$rules" || { \
@@ -176,7 +172,7 @@ nuttx-check-toolchain:
 		test -n "$$PLAYGROUND_ROOT" || { \
 			echo "PLAYGROUND_ROOT is unset, and the firmware path needs it."; \
 			echo "The path would resolve to /build/... and the build would"; \
-			echo "substitute a dummy blob. Enter the dev shell with make shell."; \
+			echo "substitute a dummy blob. Enter the dev shell with nix develop."; \
 			exit 1; }; ;; esac; \
 	fw=$$(eval echo "$$fw"); \
 	case "$$fw" in /*) ;; *) fw="$(NUTTX_DIR)/$$fw" ;; esac; \
@@ -188,7 +184,7 @@ nuttx-check-toolchain:
 	fi
 	@test -z "$(NUTTX_CC)" || command -v $(NUTTX_CC) >/dev/null 2>&1 || { \
 		echo "$(NUTTX_CC) is not on PATH, and the configured board needs it."; \
-		echo "Enter the Nix dev shell with make shell, or install the system"; \
+		echo "Enter the Nix dev shell with nix develop, or install the system"; \
 		echo "packages with make setup-deps."; \
 		exit 1; }
 	@test "$(NUTTX_ARCH)" = risc-v || exit 0; \
@@ -200,7 +196,7 @@ nuttx-check-toolchain:
 		echo "still uses, so the build fails inside esp-hal-3rdparty with"; \
 		echo "'initializer element is not constant'. The flake pins GCC 14 for"; \
 		echo "this reason, so this shell predates that pin. Leave it and enter"; \
-		echo "a fresh one with make shell."; \
+		echo "a fresh one with nix develop."; \
 		exit 1; \
 	fi
 

@@ -98,6 +98,6 @@ direct_dependencies:
 - espressif/esp_hosted
 - espressif/esp_wifi_remote
 - joltwallet/littlefs
-manifest_hash: f60ef0dc620abe987abcade92620027589f13a8487f2cd8b32de9cb9aeffba83
+manifest_hash: d2f27b88e2404aeb9fd9ac36ce0d00c3ec55823dbddd4c5779800142434a94cb
 target: esp32p4
 version: 3.0.0

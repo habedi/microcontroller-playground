@@ -23,7 +23,7 @@ This is a playground for my microcontroller projects and experiments.
 
 ### Quickstart
 
-To follow the steps below, you need to have Git and [Nix](https://nixos.org/download/) (with flakes enabled) installed on your machine.
+To follow the steps below, you need to have Git, GNU Make, and [Nix](https://nixos.org/download/) (with flakes enabled) installed on your machine.
 
 #### 1. Clone the repository
 
@@ -40,7 +40,7 @@ nix develop
 ```
 
 > [!IMPORTANT]
-> The first `make shell` builds the RISC-V cross-compiler from source.
+> The first `nix develop` builds the RISC-V cross-compiler from source.
 > Run `make shell-pin` afterward to protect it from Nix garbage collection.
 > Espressif boards also need `make install` for esptool.
 
